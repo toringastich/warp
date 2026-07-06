@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import TransformCanvas, {
   type Drawable,
+  type VectorDrawable,
 } from "./components/TransformCanvas";
 import ExpressionList from "./components/ExpressionList";
 import {
+  apply,
   eigen,
   IDENTITY,
   lerp,
@@ -100,6 +102,7 @@ export default function App() {
     const stageNamesOf = new Map<RowId, string[]>();
     const warpables = new Set<RowId>(); // expr rows that can drive the warp
     const eigenRows = new Set<RowId>();
+    const ridingVectors = new Map<RowId, VectorDrawable>();
     const env: Env = new Map();
     let ci = 0;
     const nextColor = () => GRAPH_COLORS[ci++ % GRAPH_COLORS.length];
@@ -145,13 +148,15 @@ export default function App() {
         const color = nextColor();
         colorOf.set(row.id, color);
         if (row.shown) {
-          drawables.push({
+          const d: VectorDrawable = {
             kind: "vector",
             vec: cellsToVector(row.cells),
             color,
             ride: true,
             label: row.name,
-          });
+          };
+          drawables.push(d);
+          ridingVectors.set(row.id, d);
         }
         continue;
       }
@@ -275,6 +280,40 @@ export default function App() {
         });
       }
     }
+    // While a warp is active, shown vectors ride it — relabel each one as its
+    // image ("M·v") and report where it lands in the row's box.
+    const active = activeId ? rows.find((r) => r.id === activeId) : undefined;
+    const activeStages = activeId ? stagesOf.get(activeId) : undefined;
+    if (active && activeStages && activeStages.length > 0) {
+      const target = activeStages[activeStages.length - 1];
+      let warpName: string;
+      if (active.kind === "matrix") {
+        warpName = active.name;
+      } else {
+        const b = active.kind === "expr" ? parseBinding(active.src) : null;
+        if (b) warpName = b.name;
+        else {
+          const s = (active.kind === "expr" ? active.src : "").trim().replace(/[*×•]/g, "·");
+          warpName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : `(${s})`;
+        }
+      }
+      for (const row of rows) {
+        if (row.kind !== "vector" || !row.shown || row.id === activeId) continue;
+        const image = apply(target, cellsToVector(row.cells));
+        const lbl = `${warpName}·${row.name}`;
+        const d = ridingVectors.get(row.id);
+        if (d) d.label = lbl;
+        results.set(row.id, {
+          lines: [
+            {
+              text: `${lbl} = (${fmt(image.x)}, ${fmt(image.y)})`,
+              color: colorOf.get(row.id),
+            },
+          ],
+        });
+      }
+    }
+
     return {
       drawables,
       results,
@@ -284,7 +323,7 @@ export default function App() {
       warpables,
       eigenRows,
     };
-  }, [rows]);
+  }, [rows, activeId]);
 
   // --- The active row (matrix or matrix-valued expression) drives the warp.
   // --- Compositions animate stage by stage: t sweeps all stages in order. ----

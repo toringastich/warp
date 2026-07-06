@@ -255,8 +255,7 @@ export default function ExpressionList(props: Props) {
                     </span>
                   </div>
                 )}
-                {row.kind === "expr" &&
-                  res?.lines?.map((line, li) => (
+                {res?.lines?.map((line, li) => (
                     <div className="result-line" key={li}>
                       <span
                         className="result-value"
