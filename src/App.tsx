@@ -3,18 +3,30 @@ import TransformCanvas, {
   type Drawable,
 } from "./components/TransformCanvas";
 import ExpressionList from "./components/ExpressionList";
-import { IDENTITY, lerp, type Vec2 } from "./lib/matrix";
+import {
+  eigen,
+  IDENTITY,
+  lerp,
+  multiply,
+  type Mat2,
+  type Vec2,
+} from "./lib/matrix";
 import {
   additiveTerms,
   evaluate,
   ExprError,
+  multiplicativeFactors,
   parse,
+  parseBinding,
+  RESERVED_NAMES,
+  type Env,
+  type Node,
   type Value,
 } from "./lib/expr";
 import {
-  buildEnv,
   cellsToMatrix,
   cellsToVector,
+  EIGEN_COLORS,
   firstMatrixName,
   GRAPH_COLORS,
   nextName,
@@ -23,10 +35,18 @@ import {
   type RowKind,
 } from "./rows";
 
-const ANIM_MS = 1400;
+const ANIM_MS = 1400; // per animation stage
+
+const SUBS = ["₁", "₂"];
 
 function fmt(n: number): string {
   const r = Math.round(n * 1e6) / 1e6;
+  return Object.is(r, -0) ? "0" : String(r);
+}
+
+/** Rounder display for eigen output, where values are usually irrational. */
+function fmt3(n: number): string {
+  const r = Math.round(n * 1e3) / 1e3;
   return Object.is(r, -0) ? "0" : String(r);
 }
 
@@ -37,8 +57,25 @@ function valueToText(v: Value): string {
   return `[${fmt(m[0])} ${fmt(m[1])}; ${fmt(m[2])} ${fmt(m[3])}]`;
 }
 
+/**
+ * Scale a unit eigenvector so its smallest nonzero component is ±1 — reads
+ * better than unit-length decimals ((1, 1) instead of (0.707, 0.707)).
+ */
+function niceDir(v: Vec2): Vec2 {
+  const ax = Math.abs(v.x);
+  const ay = Math.abs(v.y);
+  const m = Math.min(ax > 1e-6 ? ax : Infinity, ay > 1e-6 ? ay : Infinity);
+  if (!Number.isFinite(m)) return v;
+  return { x: v.x / m, y: v.y / m };
+}
+
+export interface ResultLine {
+  text: string;
+  color?: string;
+}
 export interface RowResult {
   text?: string;
+  lines?: ResultLine[];
   error?: string;
 }
 
@@ -49,24 +86,62 @@ export default function App() {
   const [rows, setRows] = useState<Row[]>(() => [
     { id: newId(), kind: "expr", src: "", shown: true },
   ]);
-  const [activeId, setActiveId] = useState<RowId | null>(
-    () => rows.find((r) => r.kind === "matrix")?.id ?? null,
-  );
+  const [activeId, setActiveId] = useState<RowId | null>(null);
   const [t, setT] = useState(1);
   const [playing, setPlaying] = useState(false);
 
-  const env = useMemo(() => buildEnv(rows), [rows]);
-
-  // --- Build the scene: drawables for the canvas + inline results. ----------
-  const { drawables, results, colorOf } = useMemo(() => {
+  // --- Build the scene: rows evaluate top-to-bottom, so a named row
+  // --- ("u = M·v") is usable by every row below it. --------------------------
+  const scene = useMemo(() => {
     const drawables: Drawable[] = [];
     const results = new Map<RowId, RowResult>();
     const colorOf = new Map<RowId, string>();
+    const stagesOf = new Map<RowId, Mat2[]>(); // cumulative warp boundaries
+    const stageNamesOf = new Map<RowId, string[]>();
+    const warpables = new Set<RowId>(); // expr rows that can drive the warp
+    const eigenRows = new Set<RowId>();
+    const env: Env = new Map();
     let ci = 0;
     const nextColor = () => GRAPH_COLORS[ci++ % GRAPH_COLORS.length];
 
+    // Cumulative products for a factor chain, applied right-to-left like
+    // function composition: M·N warps by N first, then M lands on M·N.
+    const buildStages = (
+      ast: Node,
+    ): { mats: Mat2[]; names: string[] } | null => {
+      const factors = multiplicativeFactors(ast);
+      if (!factors || factors.length < 2) return null;
+      const ms: Mat2[] = [];
+      for (const f of factors) {
+        let v: Value;
+        try {
+          v = evaluate(f, env);
+        } catch {
+          return null;
+        }
+        if (v.kind !== "matrix") return null;
+        ms.push(v.value);
+      }
+      const mats: Mat2[] = [];
+      const names: string[] = [];
+      let acc: Mat2 = IDENTITY;
+      for (let i = ms.length - 1; i >= 0; i--) {
+        acc = multiply(ms[i], acc);
+        mats.push(acc);
+        const f = factors[i];
+        names.push(f.t === "var" ? f.name : `step ${ms.length - i}`);
+      }
+      return { mats, names };
+    };
+
     for (const row of rows) {
+      if (row.kind === "matrix") {
+        env.set(row.name, { kind: "matrix", value: cellsToMatrix(row.cells) });
+        stagesOf.set(row.id, [cellsToMatrix(row.cells)]);
+        continue;
+      }
       if (row.kind === "vector") {
+        env.set(row.name, { kind: "vector", value: cellsToVector(row.cells) });
         const color = nextColor();
         colorOf.set(row.id, color);
         if (row.shown) {
@@ -78,72 +153,159 @@ export default function App() {
             label: row.name,
           });
         }
-      } else if (row.kind === "expr") {
-        const src = row.src.trim();
-        if (!src) continue;
-        try {
-          const ast = parse(src);
-          const value = evaluate(ast, env);
-          results.set(row.id, { text: valueToText(value) });
-          if (value.kind === "vector") {
-            const color = nextColor();
-            colorOf.set(row.id, color);
-            // Decompose a top-level sum/difference into head-to-tail parts.
-            const terms = additiveTerms(ast);
-            let parts: Vec2[] | null = null;
-            if (terms && terms.length >= 2) {
-              parts = [];
-              for (const term of terms) {
-                const tv = evaluate(term.node, env);
-                if (tv.kind !== "vector") {
-                  parts = null;
-                  break;
-                }
-                parts.push({ x: term.sign * tv.value.x, y: term.sign * tv.value.y });
-              }
-            }
+        continue;
+      }
+
+      const src = row.src.trim();
+      if (!src) continue;
+      try {
+        const binding = parseBinding(src);
+        if (binding && RESERVED_NAMES.has(binding.name))
+          throw new ExprError(`"${binding.name}" is a reserved name`);
+        if (binding && env.has(binding.name))
+          throw new ExprError(`"${binding.name}" is already defined`);
+        if (binding && !binding.expr.trim()) continue; // still typing "u ="
+        const ast = parse(binding ? binding.expr : src);
+
+        if (ast.t === "eigen") {
+          if (binding)
+            throw new ExprError("eigen(…) can't be assigned to a name");
+          const mv = evaluate(ast.a, env);
+          if (mv.kind !== "matrix") throw new ExprError("eigen expects a matrix");
+          const eg = eigen(mv.value);
+          eigenRows.add(row.id);
+          if (eg.kind === "complex") {
+            results.set(row.id, {
+              lines: [
+                { text: `λ = ${fmt3(eg.re)} ± ${fmt3(eg.im)}i` },
+                { text: "complex — no real eigenvectors (space rotates)" },
+              ],
+            });
+          } else if (eg.kind === "uniform") {
+            results.set(row.id, {
+              lines: [
+                {
+                  text: `λ = ${fmt3(eg.value)} — every vector is an eigenvector`,
+                },
+              ],
+            });
+          } else {
+            const lines: ResultLine[] = eg.pairs.map((p, i) => {
+              const d = niceDir(p.vec);
+              return {
+                text: `λ${SUBS[i]} = ${fmt3(p.value)}   →  (${fmt3(d.x)}, ${fmt3(d.y)})`,
+                color: EIGEN_COLORS[i],
+              };
+            });
+            if (eg.repeated)
+              lines.push({ text: "repeated eigenvalue — one eigen-direction" });
+            results.set(row.id, { lines });
             if (row.shown) {
-              if (parts) {
-                drawables.push({
-                  kind: "sum",
-                  parts,
-                  result: value.value,
-                  color,
-                  ride: false,
-                });
-              } else {
+              eg.pairs.forEach((p, i) => {
+                const color = EIGEN_COLORS[i];
+                // Invariant line of the target matrix stays put; the unit
+                // eigenvector rides the warp and stretches by λ along it.
+                drawables.push({ kind: "line", dir: p.vec, color });
                 drawables.push({
                   kind: "vector",
-                  vec: value.value,
+                  vec: p.vec,
                   color,
-                  ride: false,
+                  ride: true,
+                  label: `λ${SUBS[i]} = ${fmt3(p.value)}`,
                 });
-              }
+              });
             }
           }
-        } catch (e) {
-          results.set(row.id, {
-            error: e instanceof ExprError ? e.message : "Invalid expression",
-          });
+          continue;
         }
+
+        const value = evaluate(ast, env);
+        if (binding) env.set(binding.name, value);
+        results.set(row.id, { text: valueToText(value) });
+
+        if (value.kind === "matrix") {
+          const st = buildStages(ast);
+          stagesOf.set(row.id, st ? st.mats : [value.value]);
+          if (st) stageNamesOf.set(row.id, st.names);
+          warpables.add(row.id);
+        } else if (value.kind === "vector") {
+          const color = nextColor();
+          colorOf.set(row.id, color);
+          // Decompose a top-level sum/difference into head-to-tail parts.
+          const terms = additiveTerms(ast);
+          let parts: Vec2[] | null = null;
+          if (terms && terms.length >= 2) {
+            parts = [];
+            for (const term of terms) {
+              const tv = evaluate(term.node, env);
+              if (tv.kind !== "vector") {
+                parts = null;
+                break;
+              }
+              parts.push({
+                x: term.sign * tv.value.x,
+                y: term.sign * tv.value.y,
+              });
+            }
+          }
+          if (row.shown) {
+            if (parts) {
+              drawables.push({
+                kind: "sum",
+                parts,
+                result: value.value,
+                color,
+                ride: false,
+                label: binding?.name,
+              });
+            } else {
+              drawables.push({
+                kind: "vector",
+                vec: value.value,
+                color,
+                ride: false,
+                label: binding?.name,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        results.set(row.id, {
+          error: e instanceof ExprError ? e.message : "Invalid expression",
+        });
       }
     }
-    return { drawables, results, colorOf };
-  }, [rows, env]);
+    return {
+      drawables,
+      results,
+      colorOf,
+      stagesOf,
+      stageNamesOf,
+      warpables,
+      eigenRows,
+    };
+  }, [rows]);
 
-  // --- Active matrix drives the ambient warp. -------------------------------
-  const activeMatrix = useMemo(() => {
-    const r = rows.find((row) => row.id === activeId && row.kind === "matrix");
-    return r && r.kind === "matrix" ? cellsToMatrix(r.cells) : null;
-  }, [rows, activeId]);
-  const warp = useMemo(
-    () => (activeMatrix ? lerp(IDENTITY, activeMatrix, t) : IDENTITY),
-    [activeMatrix, t],
+  // --- The active row (matrix or matrix-valued expression) drives the warp.
+  // --- Compositions animate stage by stage: t sweeps all stages in order. ----
+  const activeStages = useMemo(
+    () => (activeId ? scene.stagesOf.get(activeId) ?? null : null),
+    [scene, activeId],
   );
+  const warp = useMemo(() => {
+    if (!activeStages) return IDENTITY;
+    const S = activeStages.length;
+    const u = Math.min(1, Math.max(0, t)) * S;
+    const k = Math.min(Math.floor(u), S - 1);
+    const from = k === 0 ? IDENTITY : activeStages[k - 1];
+    return lerp(from, activeStages[k], u - k);
+  }, [activeStages, t]);
 
-  // --- Animation loop (constant rate, glides through any collapse). ----------
+  // --- Animation loop (constant rate per stage). -----------------------------
   const tRef = useRef(t);
   tRef.current = t;
+  const animMsRef = useRef(ANIM_MS);
+  animMsRef.current = ANIM_MS * (activeStages?.length ?? 1);
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
@@ -152,7 +314,7 @@ export default function App() {
       if (!last) last = now;
       const dt = now - last;
       last = now;
-      const next = tRef.current + dt / ANIM_MS;
+      const next = tRef.current + dt / animMsRef.current;
       if (next >= 1) {
         setT(1);
         setPlaying(false);
@@ -176,6 +338,8 @@ export default function App() {
         row = { id, kind: "vector", name: nextName(prev, "vector"), cells: ["", ""], shown: true };
       else if (kind === "det")
         row = { id, kind: "expr", src: `det(${firstMatrixName(prev)})`, shown: true };
+      else if (kind === "eigen")
+        row = { id, kind: "expr", src: `eigen(${firstMatrixName(prev)})`, shown: true };
       else row = { id, kind: "expr", src: "", shown: true };
 
       if (afterId != null) {
@@ -224,12 +388,21 @@ export default function App() {
     }
   };
 
-  // Toggle a row's graph on/off. Matrices share a single "active warp" slot,
-  // so turning one on turns any other matrix off automatically.
+  const setExprSrc = (id: RowId, src: string) => {
+    updateRow(id, { src } as Partial<Row>);
+    if (activeId === id) {
+      setPlaying(false);
+      setT(1);
+    }
+  };
+
+  // Toggle a row's graph on/off. Warp sources (matrices and matrix-valued
+  // expressions) share a single "active warp" slot, so turning one on turns
+  // any other off automatically.
   const toggleShown = (id: RowId) => {
     const row = rows.find((r) => r.id === id);
     if (!row) return;
-    if (row.kind === "matrix") {
+    if (row.kind === "matrix" || scene.warpables.has(id)) {
       setActiveId((prev) => (prev === id ? null : id));
       setPlaying(false);
       setT(1);
@@ -263,12 +436,12 @@ export default function App() {
     });
   };
 
-  const playMatrix = (id: RowId) => {
+  const playWarp = (id: RowId) => {
     setActiveId(id);
     if (tRef.current >= 1) setT(0);
     setPlaying(true);
   };
-  const scrubMatrix = (id: RowId, value: number) => {
+  const scrubWarp = (id: RowId, value: number) => {
     setActiveId(id);
     setPlaying(false);
     setT(value);
@@ -278,8 +451,11 @@ export default function App() {
     <div className="app">
       <ExpressionList
         rows={rows}
-        results={results}
-        colorOf={colorOf}
+        results={scene.results}
+        colorOf={scene.colorOf}
+        warpables={scene.warpables}
+        eigenRows={scene.eigenRows}
+        stageNamesOf={scene.stageNamesOf}
         activeId={activeId}
         t={t}
         playing={playing}
@@ -287,17 +463,17 @@ export default function App() {
         onToggle={toggleShown}
         onDelete={deleteRow}
         onRename={(id, name) => updateRow(id, { name } as Partial<Row>)}
-        onExprChange={(id, src) => updateRow(id, { src } as Partial<Row>)}
+        onExprChange={setExprSrc}
         onMatrixCell={setMatrixCell}
         onVectorCell={setVectorCell}
-        onPlay={playMatrix}
-        onScrub={scrubMatrix}
+        onPlay={playWarp}
+        onScrub={scrubWarp}
       />
       <main className="stage">
         <TransformCanvas
           warp={warp}
-          showActiveMatrix={activeMatrix !== null}
-          drawables={drawables}
+          showActiveMatrix={activeStages !== null}
+          drawables={scene.drawables}
         />
       </main>
     </div>

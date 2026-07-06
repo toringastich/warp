@@ -47,9 +47,21 @@ phase can layer on Three.js without a rewrite.
 - **Expression-list sandbox**: add matrices (`M, N…`), vectors (`v, w…`), and
   free-form expressions via a per-row gear palette. Everything is live.
 - **Expression engine**: `+ − ×`, unary minus, parentheses, vector literals
-  `(a, b)`, implicit multiplication, `det()`, and variable references over
-  scalars / vectors / 2×2 matrices — so `M·v`, `M·N`, `det(M)`, `v + w` all work,
-  with typed error messages and inline results.
+  `(a, b)`, implicit multiplication, `det()`, `eigen()`, and variable references
+  over scalars / vectors / 2×2 matrices — so `M·v`, `M·N`, `det(M)`, `v + w` all
+  work, with typed error messages and inline results.
+- **Named expression rows**: `u = M·v` binds a name that every row below it can
+  use (rows evaluate top-to-bottom, so definitions come before uses). Named
+  vector results plot with their label.
+- **Composition animation**: a matrix-valued expression (`M·N`, `C = M·N·P`)
+  is itself graphable — toggle it on and the play button animates one factor at
+  a time, right-to-left (first N warps space, then M lands on M·N), with a
+  stage indicator showing which factor is applying.
+- **Eigenvectors**: `eigen(M)` shows λ₁/λ₂ and their eigen-directions inline,
+  draws the invariant lines (dashed) through the origin, and plots unit
+  eigenvectors that ride the warp — so during animation they stretch by λ along
+  their fixed line. Complex (rotation-like), repeated, and λI ("every vector")
+  cases are all reported.
 - **Space-warp graphing**: the active matrix deforms the grid; î (blue) / ĵ
   (green) land on its columns; the unit square becomes the parallelogram whose
   area is |det|.
@@ -62,5 +74,5 @@ phase can layer on Three.js without a rewrite.
 
 ## Roadmap
 
-Named expression rows (`u = M·v`), composition animation for `M·N`,
-eigenvectors, shareable URLs, 3D (3×3 matrices), and export.
+Warp is deliberately a **sandbox** — a blank canvas you build scenes in, not a
+preset gallery. Next up: shareable URLs, 3D (3×3 matrices), and export.

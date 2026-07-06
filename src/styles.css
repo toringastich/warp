@@ -193,6 +193,14 @@ body,
   border-color: transparent;
   background: linear-gradient(135deg, var(--blue) 0 50%, var(--green) 50% 100%);
 }
+/* Eigen rows: a split orange/purple disc (λ₁ / λ₂). */
+.toggle-dot.eigen {
+  border-color: #d3b49a;
+}
+.toggle-dot.eigen.on {
+  border-color: transparent;
+  background: linear-gradient(135deg, #e0792b 0 50%, #6042a6 50% 100%);
+}
 .row-main {
   display: flex;
   align-items: center;
@@ -354,6 +362,13 @@ body,
   min-width: 0;
   accent-color: var(--blue);
   cursor: pointer;
+}
+.stage-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ---------- Results ---------- */

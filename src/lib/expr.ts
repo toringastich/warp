@@ -91,7 +91,8 @@ export type Node =
   | { t: "add"; a: Node; b: Node }
   | { t: "sub"; a: Node; b: Node }
   | { t: "mul"; a: Node; b: Node }
-  | { t: "det"; a: Node };
+  | { t: "det"; a: Node }
+  | { t: "eigen"; a: Node };
 
 class Parser {
   private pos = 0;
@@ -159,12 +160,13 @@ class Parser {
     if (!tok) throw new ExprError("Unexpected end of expression");
     if (tok.t === "num") return { t: "num", v: tok.v };
     if (tok.t === "id") {
-      if (tok.v === "det") {
-        if (this.peek()?.t !== "lp") throw new ExprError("det expects parentheses");
+      if (tok.v === "det" || tok.v === "eigen") {
+        if (this.peek()?.t !== "lp")
+          throw new ExprError(`${tok.v} expects parentheses`);
         this.next(); // (
         const inner = this.parseExpr();
         if (this.next()?.t !== "rp") throw new ExprError("Missing )");
-        return { t: "det", a: inner };
+        return { t: tok.v, a: inner };
       }
       return { t: "var", name: tok.v };
     }
@@ -264,7 +266,44 @@ export function evaluate(node: Node, env: Env): Value {
       if (a.kind !== "matrix") throw new ExprError("det expects a matrix");
       return scalar(matDet(a.value));
     }
+    case "eigen":
+      // eigen doesn't produce a scalar/vector/matrix, so it can't take part
+      // in a larger expression; App handles it at the top level of a row.
+      throw new ExprError("eigen(…) can only be used on its own");
   }
+}
+
+/** Names with built-in meaning that rows can't bind. */
+export const RESERVED_NAMES = new Set(["det", "eigen"]);
+
+/**
+ * If the row's source is a name binding like "u = M·v", split it into the
+ * name and the expression text. Returns null for plain expressions.
+ */
+export function parseBinding(src: string): { name: string; expr: string } | null {
+  const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)([\s\S]*)$/.exec(src);
+  if (!m) return null;
+  return { name: m[1], expr: m[2] };
+}
+
+/**
+ * If the expression's top level is a product, return its factors in source
+ * order (M·N·P -> [M, N, P]). Used to animate a composition one factor at a
+ * time. Returns null if the root isn't a product.
+ */
+export function multiplicativeFactors(node: Node): Node[] | null {
+  if (node.t !== "mul") return null;
+  const out: Node[] = [];
+  const walk = (n: Node) => {
+    if (n.t === "mul") {
+      walk(n.a);
+      walk(n.b);
+    } else {
+      out.push(n);
+    }
+  };
+  walk(node);
+  return out;
 }
 
 /**

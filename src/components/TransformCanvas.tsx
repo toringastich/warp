@@ -30,7 +30,14 @@ export interface SumDrawable {
   ride: boolean;
   label?: string;
 }
-export type Drawable = VectorDrawable | SumDrawable;
+export interface LineDrawable {
+  kind: "line";
+  /** Direction of an invariant line through the origin (an eigen-direction).
+   *  Drawn fixed: it belongs to the target matrix, which maps it to itself. */
+  dir: Vec2;
+  color: string;
+}
+export type Drawable = VectorDrawable | SumDrawable | LineDrawable;
 
 const COLORS = {
   bg: "#ffffff",
@@ -306,6 +313,29 @@ export default function TransformCanvas({
       const xf = (v: Vec2, ride: boolean) => (ride ? apply(M, v) : v);
       const zero = { x: 0, y: 0 };
       for (const d of drawablesRef.current) {
+        if (d.kind === "line") {
+          // Span the whole viewport through the origin along d.dir.
+          const reach =
+            Math.max(
+              Math.abs(visMinX),
+              Math.abs(visMaxX),
+              Math.abs(visMinY),
+              Math.abs(visMaxY),
+            ) * 3;
+          const p1 = toScreen({ x: d.dir.x * reach, y: d.dir.y * reach });
+          const p2 = toScreen({ x: -d.dir.x * reach, y: -d.dir.y * reach });
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.strokeStyle = d.color;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([7, 6]);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+          ctx.restore();
+          continue;
+        }
         if (d.kind === "vector") {
           if (d.vec.x === 0 && d.vec.y === 0) continue;
           const tip = xf(d.vec, d.ride);

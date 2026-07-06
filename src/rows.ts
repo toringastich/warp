@@ -3,7 +3,7 @@
  * to name them, read their numeric values, and build the evaluation env.
  */
 import { type Mat2, type Vec2 } from "./lib/matrix";
-import { type Env } from "./lib/expr";
+import { parseBinding } from "./lib/expr";
 
 export type RowId = string;
 
@@ -28,16 +28,22 @@ export interface ExprRow {
 }
 export type Row = MatrixRow | VectorRow | ExprRow;
 
-export type RowKind = "matrix" | "vector" | "expr" | "det";
+export type RowKind = "matrix" | "vector" | "expr" | "det" | "eigen";
 
 const MATRIX_NAMES = ["M", "N", "P", "Q", "R", "S", "T"];
 const VECTOR_NAMES = ["v", "w", "u", "p", "q", "r", "s"];
 
 /** First unused name from the appropriate pool. */
 export function nextName(rows: Row[], kind: "matrix" | "vector"): string {
-  const used = new Set(
-    rows.filter((r): r is MatrixRow | VectorRow => r.kind !== "expr").map((r) => r.name),
-  );
+  const used = new Set<string>();
+  for (const r of rows) {
+    if (r.kind === "expr") {
+      const b = parseBinding(r.src);
+      if (b) used.add(b.name);
+    } else {
+      used.add(r.name);
+    }
+  }
   const pool = kind === "matrix" ? MATRIX_NAMES : VECTOR_NAMES;
   for (const n of pool) if (!used.has(n)) return n;
   const prefix = kind === "matrix" ? "M" : "v";
@@ -63,18 +69,6 @@ export function cellsToVector(c: VectorRow["cells"]): Vec2 {
   return { x: num(c[0]), y: num(c[1]) };
 }
 
-/** Build the variable environment from every named (matrix/vector) row. */
-export function buildEnv(rows: Row[]): Env {
-  const env: Env = new Map();
-  for (const r of rows) {
-    if (r.kind === "matrix")
-      env.set(r.name, { kind: "matrix", value: cellsToMatrix(r.cells) });
-    else if (r.kind === "vector")
-      env.set(r.name, { kind: "vector", value: cellsToVector(r.cells) });
-  }
-  return env;
-}
-
 /** Colors for plotted vectors/results (blue + green are reserved for î, ĵ). */
 export const GRAPH_COLORS = [
   "#e0792b",
@@ -84,3 +78,6 @@ export const GRAPH_COLORS = [
   "#c026d3",
   "#b45309",
 ];
+
+/** Fixed colors for λ₁ / λ₂ so eigen rows always look the same. */
+export const EIGEN_COLORS = ["#e0792b", "#6042a6"];
