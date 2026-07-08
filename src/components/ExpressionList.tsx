@@ -12,6 +12,8 @@ interface Props {
   eigenRows: Set<RowId>;
   /** Expr rows that bind a name to a plain number — they get a slider. */
   sliders: Map<RowId, number>;
+  /** Top-level proj(v, w) rows — they get drop-animation controls. */
+  projRows: Set<RowId>;
   /** Per-stage labels for composition animations (applied-first first). */
   stageNamesOf: Map<RowId, string[]>;
   activeId: RowId | null;
@@ -34,8 +36,17 @@ const PALETTE: { kind: RowKind; label: string }[] = [
   { kind: "vector", label: "Add vector" },
   { kind: "expr", label: "Add expression" },
   { kind: "slider", label: "Add slider" },
-  { kind: "det", label: "det( )" },
-  { kind: "eigen", label: "eigen( )" },
+];
+
+/** Engine built-ins, inserted into an expression by its gear menu. */
+const FUNCTIONS: { label: string; insert: string }[] = [
+  { label: "det( )", insert: "det()" },
+  { label: "eigen( )", insert: "eigen()" },
+  { label: "inv( )", insert: "inv()" },
+  { label: "transpose( )", insert: "transpose()" },
+  { label: "dot( , )", insert: "dot(, )" },
+  { label: "norm( )", insert: "norm()" },
+  { label: "proj( , )", insert: "proj(, )" },
 ];
 
 /** Round a slider position to something readable ("3.7", not "3.70000004"). */
@@ -60,6 +71,7 @@ export default function ExpressionList(props: Props) {
     warpables,
     eigenRows,
     sliders,
+    projRows,
     stageNamesOf,
     activeId,
     t,
@@ -77,6 +89,25 @@ export default function ExpressionList(props: Props) {
       {PALETTE.map((p) => (
         <button key={p.kind} className="palette-item" onClick={() => pick(p.kind, afterId)}>
           {p.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const insertFunction = (row: Row & { kind: "expr" }, text: string) => {
+    props.onExprChange(row.id, row.src + text);
+    setOpenGear(null);
+  };
+
+  const functionPalette = (row: Row & { kind: "expr" }) => (
+    <div className="palette">
+      {FUNCTIONS.map((f) => (
+        <button
+          key={f.label}
+          className="palette-item"
+          onClick={() => insertFunction(row, f.insert)}
+        >
+          {f.label}
         </button>
       ))}
     </div>
@@ -204,20 +235,22 @@ export default function ExpressionList(props: Props) {
                   )}
 
                   <div className="row-actions">
-                    <div className="gear-wrap">
-                      <button
-                        className="gear gear-sm"
-                        title="Add…"
-                        onClick={() =>
-                          setOpenGear(
-                            openGear === gearKey(row.id) ? null : gearKey(row.id),
-                          )
-                        }
-                      >
-                        ⚙
-                      </button>
-                      {openGear === gearKey(row.id) && palette(row.id)}
-                    </div>
+                    {row.kind === "expr" && (
+                      <div className="gear-wrap">
+                        <button
+                          className="gear gear-sm"
+                          title="Insert a function…"
+                          onClick={() =>
+                            setOpenGear(
+                              openGear === gearKey(row.id) ? null : gearKey(row.id),
+                            )
+                          }
+                        >
+                          ⚙
+                        </button>
+                        {openGear === gearKey(row.id) && functionPalette(row)}
+                      </div>
+                    )}
                     <button
                       className="del"
                       title="Delete"
@@ -285,13 +318,19 @@ export default function ExpressionList(props: Props) {
                     );
                   })()}
 
-                {/* Animation controls for the active warp source */}
-                {isWarp && activeId === row.id && (
+                {/* Animation controls: the active warp source, or a visible
+                    projection (which animates the perpendicular drop) */}
+                {((isWarp && activeId === row.id) ||
+                  (projRows.has(row.id) && shown)) && (
                   <div className="anim">
                     <button
                       className="play"
                       onClick={() => props.onPlay(row.id)}
-                      title="Animate identity → matrix"
+                      title={
+                        isWarp
+                          ? "Animate identity → matrix"
+                          : "Animate the projection"
+                      }
                     >
                       {playing && activeId === row.id ? "❚❚" : "▶"}
                     </button>
@@ -342,9 +381,7 @@ export default function ExpressionList(props: Props) {
                       </span>
                     </div>
                   ))}
-                {row.kind === "expr" && res?.error && (
-                  <div className="result-error">{res.error}</div>
-                )}
+                {res?.error && <div className="result-error">{res.error}</div>}
               </div>
             </div>
           );

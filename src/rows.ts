@@ -31,7 +31,7 @@ export interface ExprRow {
 }
 export type Row = MatrixRow | VectorRow | ExprRow;
 
-export type RowKind = "matrix" | "vector" | "expr" | "slider" | "det" | "eigen";
+export type RowKind = "matrix" | "vector" | "expr" | "slider";
 
 const MATRIX_NAMES = ["M", "N", "P", "Q", "R", "S", "T"];
 const VECTOR_NAMES = ["v", "w", "u", "p", "q", "r", "s"];

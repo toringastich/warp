@@ -37,7 +37,17 @@ export interface LineDrawable {
   dir: Vec2;
   color: string;
 }
-export type Drawable = VectorDrawable | SumDrawable | LineDrawable;
+export interface ProjDrawable {
+  kind: "proj";
+  from: Vec2; // the vector being projected
+  to: Vec2; // its projection (the foot of the perpendicular)
+  dir: Vec2; // unit direction of the line being projected onto
+  color: string;
+  label?: string;
+  /** Sweep the arrow from `from` to `to` with projT instead of drawing settled. */
+  animate: boolean;
+}
+export type Drawable = VectorDrawable | SumDrawable | LineDrawable | ProjDrawable;
 
 const COLORS = {
   bg: "#ffffff",
@@ -68,24 +78,29 @@ interface Props {
   /** Draw the basis vectors + unit parallelogram for the active matrix. */
   showActiveMatrix: boolean;
   drawables: Drawable[];
+  /** Animation position for proj drawables flagged `animate`. */
+  projT: number;
 }
 
 export default function TransformCanvas({
   warp,
   showActiveMatrix,
   drawables,
+  projT,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ cx: 0, cy: 0, scale: 80 });
   const warpRef = useRef<Mat2>(warp);
   const drawablesRef = useRef<Drawable[]>(drawables);
   const activeRef = useRef<boolean>(showActiveMatrix);
+  const projTRef = useRef<number>(projT);
   const sizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const dragRef = useRef<{ x: number; y: number } | null>(null);
 
   warpRef.current = warp;
   drawablesRef.current = drawables;
   activeRef.current = showActiveMatrix;
+  projTRef.current = projT;
 
   const drawRef = useRef<() => void>(() => {});
 
@@ -312,28 +327,60 @@ export default function TransformCanvas({
       // User drawables.
       const xf = (v: Vec2, ride: boolean) => (ride ? apply(M, v) : v);
       const zero = { x: 0, y: 0 };
+      // Dashed line through the origin along dir, spanning the viewport.
+      const originLine = (dir: Vec2, color: string) => {
+        const reach =
+          Math.max(
+            Math.abs(visMinX),
+            Math.abs(visMaxX),
+            Math.abs(visMinY),
+            Math.abs(visMaxY),
+          ) * 3;
+        const p1 = toScreen({ x: dir.x * reach, y: dir.y * reach });
+        const p2 = toScreen({ x: -dir.x * reach, y: -dir.y * reach });
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([7, 6]);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+        ctx.restore();
+      };
       for (const d of drawablesRef.current) {
         if (d.kind === "line") {
-          // Span the whole viewport through the origin along d.dir.
-          const reach =
-            Math.max(
-              Math.abs(visMinX),
-              Math.abs(visMaxX),
-              Math.abs(visMinY),
-              Math.abs(visMaxY),
-            ) * 3;
-          const p1 = toScreen({ x: d.dir.x * reach, y: d.dir.y * reach });
-          const p2 = toScreen({ x: -d.dir.x * reach, y: -d.dir.y * reach });
-          ctx.save();
-          ctx.globalAlpha = 0.5;
-          ctx.strokeStyle = d.color;
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([7, 6]);
-          ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.stroke();
-          ctx.restore();
+          originLine(d.dir, d.color);
+          continue;
+        }
+        if (d.kind === "proj") {
+          const tt = d.animate ? projTRef.current : 1;
+          // The line being projected onto, plus a ghost of the source vector.
+          originLine(d.dir, d.color);
+          arrow(zero, d.from, d.color, { width: 2, alpha: 0.35 });
+          // The arrow sweeps from the source to the foot of the perpendicular;
+          // the dotted trail behind it is the (perpendicular) drop path.
+          const q = {
+            x: d.from.x + (d.to.x - d.from.x) * tt,
+            y: d.from.y + (d.to.y - d.from.y) * tt,
+          };
+          const a = toScreen(d.from);
+          const b = toScreen(q);
+          if (Math.hypot(b.x - a.x, b.y - a.y) > 1) {
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            ctx.strokeStyle = d.color;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 4]);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+          arrow(zero, q, d.color, { width: 3 });
+          if (d.label) label(q, d.label, d.color);
           continue;
         }
         if (d.kind === "vector") {
@@ -398,7 +445,7 @@ export default function TransformCanvas({
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const before = toWorld(sx, sy);
-      const factor = Math.exp(-e.deltaY * 0.0015);
+      const factor = Math.exp(-e.deltaY * 0.004);
       viewRef.current.scale = Math.min(
         4000,
         Math.max(8, viewRef.current.scale * factor),
@@ -426,7 +473,7 @@ export default function TransformCanvas({
 
   useEffect(() => {
     drawRef.current();
-  }, [warp, drawables, showActiveMatrix]);
+  }, [warp, drawables, showActiveMatrix, projT]);
 
   return <canvas ref={canvasRef} className="warp-canvas" />;
 }

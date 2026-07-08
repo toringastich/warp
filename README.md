@@ -46,20 +46,24 @@ phase can layer on Three.js without a rewrite.
 
 ## What it does today
 
-- **Expression-list sandbox**: add matrices (`M, N…`), vectors (`v, w…`), and
-  free-form expressions via a per-row gear palette. Everything is live.
+- **Expression-list sandbox**: add matrices (`M, N…`), vectors (`v, w…`),
+  expressions, and sliders from the header **+** menu; each expression row's
+  gear menu inserts any engine function (`det`, `eigen`, `inv`, `transpose`,
+  `dot`, `norm`, `proj`). Everything is live.
 - **Expression engine**: `+ − ×`, unary minus, parentheses, vector literals
   `(a, b)`, implicit multiplication, and variable references over scalars /
   vectors / 2×2 matrices — so `M·v`, `M·N`, `det(M)`, `v + w` all work, with
   typed error messages and inline results. Built-ins: `det()`, `eigen()`,
   `inv()`, `transpose()`, `dot(v, w)`, `norm(v)`, and `proj(v, w)` (projection
-  of v onto w).
+  of v onto w). Graphing `proj(v, w)` draws the line through w, a ghost of v,
+  and the perpendicular drop — with a play button that animates v falling onto
+  its projection.
 - **Sliders**: binding a name to a number (`a = 1.5`) turns the row into a
   Desmos-style slider with editable bounds; every expression using it — and
   the active warp — updates live as you drag (`a·M`, `a·v + w`, …).
-- **Named expression rows**: `u = M·v` binds a name that every row below it can
-  use (rows evaluate top-to-bottom, so definitions come before uses). Named
-  vector results plot with their label.
+- **Named expression rows**: `u = M·v` binds a name any other row can use —
+  above or below; definitions resolve document-wide regardless of order, and
+  duplicate names are flagged. Named vector results plot with their label.
 - **Composition animation**: a matrix-valued expression (`M·N`, `C = M·N·P`)
   is itself graphable — toggle it on and the play button animates one factor at
   a time, right-to-left (first N warps space, then M lands on M·N), with a

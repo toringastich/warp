@@ -29,7 +29,6 @@ import {
   cellsToMatrix,
   cellsToVector,
   EIGEN_COLORS,
-  firstMatrixName,
   GRAPH_COLORS,
   nextName,
   type Row,
@@ -92,8 +91,9 @@ export default function App() {
   const [t, setT] = useState(1);
   const [playing, setPlaying] = useState(false);
 
-  // --- Build the scene: rows evaluate top-to-bottom, so a named row
-  // --- ("u = M·v") is usable by every row below it. --------------------------
+  // --- Build the scene. Names are document-global: the first row to define a
+  // --- name owns it, and any other row may reference it — above or below.
+  // --- Literal rows resolve first, then named expressions to a fixpoint.  ----
   const scene = useMemo(() => {
     const drawables: Drawable[] = [];
     const results = new Map<RowId, RowResult>();
@@ -103,10 +103,55 @@ export default function App() {
     const warpables = new Set<RowId>(); // expr rows that can drive the warp
     const eigenRows = new Set<RowId>();
     const sliders = new Map<RowId, number>(); // scalar bindings -> current value
+    const projRows = new Set<RowId>(); // top-level proj(v, w) rows (animatable)
     const ridingVectors = new Map<RowId, VectorDrawable>();
     const env: Env = new Map();
     let ci = 0;
     const nextColor = () => GRAPH_COLORS[ci++ % GRAPH_COLORS.length];
+
+    const nameOwner = new Map<string, RowId>();
+    for (const row of rows) {
+      const nm =
+        row.kind === "expr" ? parseBinding(row.src)?.name ?? null : row.name;
+      if (!nm || RESERVED_NAMES.has(nm)) continue;
+      if (!nameOwner.has(nm)) nameOwner.set(nm, row.id);
+    }
+
+    // Literal rows don't depend on anything — bind them first.
+    for (const row of rows) {
+      if (row.kind === "matrix" && nameOwner.get(row.name) === row.id)
+        env.set(row.name, { kind: "matrix", value: cellsToMatrix(row.cells) });
+      else if (row.kind === "vector" && nameOwner.get(row.name) === row.id)
+        env.set(row.name, { kind: "vector", value: cellsToVector(row.cells) });
+    }
+
+    // Named expressions may reference each other in any order, so keep
+    // resolving until a pass makes no progress. Whatever never resolves
+    // (missing names, cycles) gets its error reported in the main pass.
+    const pending: { name: string; ast: Node }[] = [];
+    for (const row of rows) {
+      if (row.kind !== "expr") continue;
+      const b = parseBinding(row.src);
+      if (!b || !b.expr.trim() || nameOwner.get(b.name) !== row.id) continue;
+      try {
+        pending.push({ name: b.name, ast: parse(b.expr) });
+      } catch {
+        // parse error — the main pass reports it
+      }
+    }
+    let progressed = true;
+    while (progressed && pending.length > 0) {
+      progressed = false;
+      for (let i = pending.length - 1; i >= 0; i--) {
+        try {
+          env.set(pending[i].name, evaluate(pending[i].ast, env));
+          pending.splice(i, 1);
+          progressed = true;
+        } catch {
+          // unresolved this round — try again after others land
+        }
+      }
+    }
 
     // Cumulative products for a factor chain, applied right-to-left like
     // function composition: M·N warps by N first, then M lands on M·N.
@@ -138,14 +183,33 @@ export default function App() {
       return { mats, names };
     };
 
+    // A literal row that lost its name (someone above defines it too, or it's
+    // a built-in) reports the clash instead of silently shadowing.
+    const nameClash = (row: Row & { name: string }): string | null => {
+      if (!row.name) return null;
+      if (RESERVED_NAMES.has(row.name))
+        return `"${row.name}" is a reserved name`;
+      if (nameOwner.get(row.name) !== row.id)
+        return `"${row.name}" is already defined`;
+      return null;
+    };
+
     for (const row of rows) {
       if (row.kind === "matrix") {
-        env.set(row.name, { kind: "matrix", value: cellsToMatrix(row.cells) });
+        const clash = nameClash(row);
+        if (clash) {
+          results.set(row.id, { error: clash });
+          continue;
+        }
         stagesOf.set(row.id, [cellsToMatrix(row.cells)]);
         continue;
       }
       if (row.kind === "vector") {
-        env.set(row.name, { kind: "vector", value: cellsToVector(row.cells) });
+        const clash = nameClash(row);
+        if (clash) {
+          results.set(row.id, { error: clash });
+          continue;
+        }
         const color = nextColor();
         colorOf.set(row.id, color);
         if (row.shown) {
@@ -168,7 +232,7 @@ export default function App() {
         const binding = parseBinding(src);
         if (binding && RESERVED_NAMES.has(binding.name))
           throw new ExprError(`"${binding.name}" is a reserved name`);
-        if (binding && env.has(binding.name))
+        if (binding && nameOwner.get(binding.name) !== row.id)
           throw new ExprError(`"${binding.name}" is already defined`);
         if (binding && !binding.expr.trim()) continue; // still typing "u ="
         const ast = parse(binding ? binding.expr : src);
@@ -225,8 +289,7 @@ export default function App() {
           continue;
         }
 
-        const value = evaluate(ast, env);
-        if (binding) env.set(binding.name, value);
+        const value = evaluate(ast, env); // env is fully populated already
         // A name bound to a plain number ("a = 1.5") gets a slider instead of
         // a redundant "= 1.5" result line.
         const isNumericLiteral =
@@ -245,6 +308,28 @@ export default function App() {
         } else if (value.kind === "vector") {
           const color = nextColor();
           colorOf.set(row.id, color);
+          // A top-level proj(v, w) draws the line it projects onto, a ghost of
+          // v, and the perpendicular drop — and can animate the drop.
+          if (ast.t === "call" && ast.fn === "proj") {
+            const from = evaluate(ast.args[0], env);
+            const onto = evaluate(ast.args[1], env);
+            if (from.kind === "vector" && onto.kind === "vector") {
+              projRows.add(row.id);
+              if (row.shown) {
+                const len = Math.hypot(onto.value.x, onto.value.y);
+                drawables.push({
+                  kind: "proj",
+                  from: from.value,
+                  to: value.value,
+                  dir: { x: onto.value.x / len, y: onto.value.y / len },
+                  color,
+                  label: binding?.name,
+                  animate: activeId === row.id,
+                });
+              }
+              continue;
+            }
+          }
           // Decompose a top-level sum/difference into head-to-tail parts.
           const terms = additiveTerms(ast);
           let parts: Vec2[] | null = null;
@@ -308,10 +393,11 @@ export default function App() {
       }
       for (const row of rows) {
         if (row.kind !== "vector" || !row.shown || row.id === activeId) continue;
+        const d = ridingVectors.get(row.id);
+        if (!d) continue; // no drawable (e.g. name clash) — keep its error
         const image = apply(target, cellsToVector(row.cells));
         const lbl = `${warpName}·${row.name}`;
-        const d = ridingVectors.get(row.id);
-        if (d) d.label = lbl;
+        d.label = lbl;
         results.set(row.id, {
           lines: [
             {
@@ -332,6 +418,7 @@ export default function App() {
       warpables,
       eigenRows,
       sliders,
+      projRows,
     };
   }, [rows, activeId]);
 
@@ -387,10 +474,6 @@ export default function App() {
         row = { id, kind: "vector", name: nextName(prev, "vector"), cells: ["", ""], shown: true };
       else if (kind === "slider")
         row = { id, kind: "expr", src: `${nextName(prev, "scalar")} = 1`, shown: true };
-      else if (kind === "det")
-        row = { id, kind: "expr", src: `det(${firstMatrixName(prev)})`, shown: true };
-      else if (kind === "eigen")
-        row = { id, kind: "expr", src: `eigen(${firstMatrixName(prev)})`, shown: true };
       else row = { id, kind: "expr", src: "", shown: true };
 
       if (afterId != null) {
@@ -463,6 +546,12 @@ export default function App() {
           r.id === id && r.kind !== "matrix" ? { ...r, shown: !r.shown } : r,
         ),
       );
+      // Hiding a proj row that was mid-animation releases the animation slot.
+      if (activeId === id) {
+        setActiveId(null);
+        setPlaying(false);
+        setT(1);
+      }
     }
   };
 
@@ -507,6 +596,7 @@ export default function App() {
         warpables={scene.warpables}
         eigenRows={scene.eigenRows}
         sliders={scene.sliders}
+        projRows={scene.projRows}
         stageNamesOf={scene.stageNamesOf}
         activeId={activeId}
         t={t}
@@ -529,6 +619,7 @@ export default function App() {
           warp={warp}
           showActiveMatrix={activeStages !== null}
           drawables={scene.drawables}
+          projT={t}
         />
       </main>
     </div>
