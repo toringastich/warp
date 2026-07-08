@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type RowResult } from "../App";
+import { parseBinding } from "../lib/expr";
 import { type Row, type RowId, type RowKind } from "../rows";
 
 interface Props {
@@ -9,6 +10,8 @@ interface Props {
   /** Expression rows whose value is a matrix — they can drive the warp. */
   warpables: Set<RowId>;
   eigenRows: Set<RowId>;
+  /** Expr rows that bind a name to a plain number — they get a slider. */
+  sliders: Map<RowId, number>;
   /** Per-stage labels for composition animations (applied-first first). */
   stageNamesOf: Map<RowId, string[]>;
   activeId: RowId | null;
@@ -19,6 +22,7 @@ interface Props {
   onDelete: (id: RowId) => void;
   onRename: (id: RowId, name: string) => void;
   onExprChange: (id: RowId, src: string) => void;
+  onSliderBounds: (id: RowId, min: string, max: string) => void;
   onMatrixCell: (id: RowId, index: number, value: string) => void;
   onVectorCell: (id: RowId, index: number, value: string) => void;
   onPlay: (id: RowId) => void;
@@ -29,9 +33,24 @@ const PALETTE: { kind: RowKind; label: string }[] = [
   { kind: "matrix", label: "Add matrix" },
   { kind: "vector", label: "Add vector" },
   { kind: "expr", label: "Add expression" },
+  { kind: "slider", label: "Add slider" },
   { kind: "det", label: "det( )" },
   { kind: "eigen", label: "eigen( )" },
 ];
+
+/** Round a slider position to something readable ("3.7", not "3.70000004"). */
+function fmtSlider(n: number): string {
+  const r = Math.round(n * 1e6) / 1e6;
+  return Object.is(r, -0) ? "0" : String(r);
+}
+
+/** ~200 steps across the range, snapped to a clean 1/2/5 × 10ⁿ increment. */
+function niceStep(span: number): number {
+  const raw = span / 200;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const m = raw / pow;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * pow;
+}
 
 export default function ExpressionList(props: Props) {
   const {
@@ -40,6 +59,7 @@ export default function ExpressionList(props: Props) {
     colorOf,
     warpables,
     eigenRows,
+    sliders,
     stageNamesOf,
     activeId,
     t,
@@ -176,7 +196,7 @@ export default function ExpressionList(props: Props) {
                       <input
                         className="expr-input"
                         type="text"
-                        placeholder="e.g. u = M·v, M·N, eigen(M)"
+                        placeholder="e.g. u = M·v, inv(M), dot(v, w)"
                         value={row.src}
                         onChange={(e) => props.onExprChange(row.id, e.target.value)}
                       />
@@ -207,6 +227,63 @@ export default function ExpressionList(props: Props) {
                     </button>
                   </div>
                 </div>
+
+                {/* Slider for a scalar binding ("a = 1.5") */}
+                {row.kind === "expr" &&
+                  sliders.has(row.id) &&
+                  (() => {
+                    const name = parseBinding(row.src)?.name;
+                    if (!name) return null;
+                    const value = sliders.get(row.id)!;
+                    const minStr = row.sliderMin ?? "-10";
+                    const maxStr = row.sliderMax ?? "10";
+                    const minNum = parseFloat(minStr);
+                    const maxNum = parseFloat(maxStr);
+                    // The dragged value always stays reachable, even if it
+                    // falls outside the typed bounds.
+                    const lo = Math.min(Number.isFinite(minNum) ? minNum : -10, value);
+                    const hi = Math.max(Number.isFinite(maxNum) ? maxNum : 10, value);
+                    const span = hi - lo || 1;
+                    return (
+                      <div className="slider-row">
+                        <input
+                          className="slider-bound"
+                          type="text"
+                          inputMode="decimal"
+                          title="Slider minimum"
+                          value={minStr}
+                          onChange={(e) =>
+                            props.onSliderBounds(row.id, e.target.value, maxStr)
+                          }
+                        />
+                        <input
+                          className="anim-slider"
+                          type="range"
+                          min={lo}
+                          max={hi}
+                          step="any"
+                          value={value}
+                          onChange={(e) => {
+                            // Quantize to a clean grid ourselves so the value
+                            // and the thumb never disagree.
+                            const st = niceStep(span);
+                            const q = Math.round(parseFloat(e.target.value) / st) * st;
+                            props.onExprChange(row.id, `${name} = ${fmtSlider(q)}`);
+                          }}
+                        />
+                        <input
+                          className="slider-bound"
+                          type="text"
+                          inputMode="decimal"
+                          title="Slider maximum"
+                          value={maxStr}
+                          onChange={(e) =>
+                            props.onSliderBounds(row.id, minStr, e.target.value)
+                          }
+                        />
+                      </div>
+                    );
+                  })()}
 
                 {/* Animation controls for the active warp source */}
                 {isWarp && activeId === row.id && (

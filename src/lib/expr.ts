@@ -8,13 +8,22 @@
  *
  * Supported syntax:
  *   + - * (and the · glyph) , unary minus, parentheses,
- *   vector literals (a, b), det(<expr>), and variable references.
+ *   vector literals (a, b), function calls (det, eigen, inv, transpose,
+ *   dot, norm, proj), and variable references.
  *   Juxtaposition means multiplication: "2v", "2(v + w)".
  *
  * Like everything in lib/, this is pure and rendering-agnostic.
  */
 
-import { apply, det as matDet, multiply, type Mat2, type Vec2 } from "./matrix";
+import {
+  apply,
+  det as matDet,
+  inverse,
+  multiply,
+  transpose as matTranspose,
+  type Mat2,
+  type Vec2,
+} from "./matrix";
 
 export type Value =
   | { kind: "scalar"; value: number }
@@ -83,6 +92,18 @@ function tokenize(src: string): Tok[] {
 // AST + parser (recursive descent)
 // ---------------------------------------------------------------------------
 
+/** Built-in functions and how many arguments each takes. */
+const FN_ARITY = {
+  det: 1,
+  eigen: 1,
+  inv: 1,
+  transpose: 1,
+  norm: 1,
+  dot: 2,
+  proj: 2,
+} as const;
+export type FnName = keyof typeof FN_ARITY;
+
 export type Node =
   | { t: "num"; v: number }
   | { t: "var"; name: string }
@@ -91,8 +112,7 @@ export type Node =
   | { t: "add"; a: Node; b: Node }
   | { t: "sub"; a: Node; b: Node }
   | { t: "mul"; a: Node; b: Node }
-  | { t: "det"; a: Node }
-  | { t: "eigen"; a: Node };
+  | { t: "call"; fn: FnName; args: Node[] };
 
 class Parser {
   private pos = 0;
@@ -160,13 +180,23 @@ class Parser {
     if (!tok) throw new ExprError("Unexpected end of expression");
     if (tok.t === "num") return { t: "num", v: tok.v };
     if (tok.t === "id") {
-      if (tok.v === "det" || tok.v === "eigen") {
+      if (tok.v in FN_ARITY) {
+        const fn = tok.v as FnName;
         if (this.peek()?.t !== "lp")
-          throw new ExprError(`${tok.v} expects parentheses`);
+          throw new ExprError(`${fn} expects parentheses`);
         this.next(); // (
-        const inner = this.parseExpr();
+        const args: Node[] = [this.parseExpr()];
+        while (this.peek()?.t === "comma") {
+          this.next();
+          args.push(this.parseExpr());
+        }
         if (this.next()?.t !== "rp") throw new ExprError("Missing )");
-        return { t: tok.v, a: inner };
+        const want = FN_ARITY[fn];
+        if (args.length !== want)
+          throw new ExprError(
+            `${fn} expects ${want} argument${want > 1 ? "s" : ""}`,
+          );
+        return { t: "call", fn, args };
       }
       return { t: "var", name: tok.v };
     }
@@ -261,20 +291,60 @@ export function evaluate(node: Node, env: Env): Value {
       return add(evaluate(node.a, env), evaluate(node.b, env), -1);
     case "mul":
       return mul(evaluate(node.a, env), evaluate(node.b, env));
-    case "det": {
-      const a = evaluate(node.a, env);
-      if (a.kind !== "matrix") throw new ExprError("det expects a matrix");
-      return scalar(matDet(a.value));
+    case "call": {
+      const args = node.args.map((n) => evaluate(n, env));
+      switch (node.fn) {
+        case "det": {
+          const [a] = args;
+          if (a.kind !== "matrix") throw new ExprError("det expects a matrix");
+          return scalar(matDet(a.value));
+        }
+        case "inv": {
+          const [a] = args;
+          if (a.kind !== "matrix") throw new ExprError("inv expects a matrix");
+          const m = inverse(a.value);
+          if (!m) throw new ExprError("Not invertible (det = 0)");
+          return matrix(m);
+        }
+        case "transpose": {
+          const [a] = args;
+          if (a.kind !== "matrix")
+            throw new ExprError("transpose expects a matrix");
+          return matrix(matTranspose(a.value));
+        }
+        case "norm": {
+          const [a] = args;
+          if (a.kind !== "vector") throw new ExprError("norm expects a vector");
+          return scalar(Math.hypot(a.value.x, a.value.y));
+        }
+        case "dot": {
+          const [a, b] = args;
+          if (a.kind !== "vector" || b.kind !== "vector")
+            throw new ExprError("dot expects two vectors");
+          return scalar(a.value.x * b.value.x + a.value.y * b.value.y);
+        }
+        case "proj": {
+          // proj(v, w): the projection of v onto w.
+          const [a, b] = args;
+          if (a.kind !== "vector" || b.kind !== "vector")
+            throw new ExprError("proj expects two vectors: proj(v, w)");
+          const ww = b.value.x * b.value.x + b.value.y * b.value.y;
+          if (ww < 1e-24)
+            throw new ExprError("Can't project onto the zero vector");
+          const k = (a.value.x * b.value.x + a.value.y * b.value.y) / ww;
+          return vector({ x: k * b.value.x, y: k * b.value.y });
+        }
+        case "eigen":
+          // eigen doesn't produce a scalar/vector/matrix, so it can't take
+          // part in a larger expression; App handles it at the top level.
+          throw new ExprError("eigen(…) can only be used on its own");
+      }
     }
-    case "eigen":
-      // eigen doesn't produce a scalar/vector/matrix, so it can't take part
-      // in a larger expression; App handles it at the top level of a row.
-      throw new ExprError("eigen(…) can only be used on its own");
   }
 }
 
 /** Names with built-in meaning that rows can't bind. */
-export const RESERVED_NAMES = new Set(["det", "eigen"]);
+export const RESERVED_NAMES = new Set(Object.keys(FN_ARITY));
 
 /**
  * If the row's source is a name binding like "u = M·v", split it into the

@@ -44,6 +44,11 @@ export function jHat(m: Mat2): Vec2 {
   return { x: m[1], y: m[3] };
 }
 
+/** Transpose: rows become columns. */
+export function transpose(m: Mat2): Mat2 {
+  return [m[0], m[2], m[1], m[3]];
+}
+
 /** Matrix product M * N. */
 export function multiply(m: Mat2, n: Mat2): Mat2 {
   return [

@@ -25,16 +25,23 @@ export interface ExprRow {
   kind: "expr";
   src: string;
   shown: boolean;
+  /** Slider bounds for scalar bindings ("a = 1.5"); kept as raw input text. */
+  sliderMin?: string;
+  sliderMax?: string;
 }
 export type Row = MatrixRow | VectorRow | ExprRow;
 
-export type RowKind = "matrix" | "vector" | "expr" | "det" | "eigen";
+export type RowKind = "matrix" | "vector" | "expr" | "slider" | "det" | "eigen";
 
 const MATRIX_NAMES = ["M", "N", "P", "Q", "R", "S", "T"];
 const VECTOR_NAMES = ["v", "w", "u", "p", "q", "r", "s"];
+const SCALAR_NAMES = ["a", "b", "c", "k", "g", "h"];
 
 /** First unused name from the appropriate pool. */
-export function nextName(rows: Row[], kind: "matrix" | "vector"): string {
+export function nextName(
+  rows: Row[],
+  kind: "matrix" | "vector" | "scalar",
+): string {
   const used = new Set<string>();
   for (const r of rows) {
     if (r.kind === "expr") {
@@ -44,9 +51,10 @@ export function nextName(rows: Row[], kind: "matrix" | "vector"): string {
       used.add(r.name);
     }
   }
-  const pool = kind === "matrix" ? MATRIX_NAMES : VECTOR_NAMES;
+  const pool =
+    kind === "matrix" ? MATRIX_NAMES : kind === "vector" ? VECTOR_NAMES : SCALAR_NAMES;
   for (const n of pool) if (!used.has(n)) return n;
-  const prefix = kind === "matrix" ? "M" : "v";
+  const prefix = kind === "matrix" ? "M" : kind === "vector" ? "v" : "a";
   let i = 1;
   while (used.has(prefix + i)) i++;
   return prefix + i;

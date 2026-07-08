@@ -102,6 +102,7 @@ export default function App() {
     const stageNamesOf = new Map<RowId, string[]>();
     const warpables = new Set<RowId>(); // expr rows that can drive the warp
     const eigenRows = new Set<RowId>();
+    const sliders = new Map<RowId, number>(); // scalar bindings -> current value
     const ridingVectors = new Map<RowId, VectorDrawable>();
     const env: Env = new Map();
     let ci = 0;
@@ -172,10 +173,10 @@ export default function App() {
         if (binding && !binding.expr.trim()) continue; // still typing "u ="
         const ast = parse(binding ? binding.expr : src);
 
-        if (ast.t === "eigen") {
+        if (ast.t === "call" && ast.fn === "eigen") {
           if (binding)
             throw new ExprError("eigen(…) can't be assigned to a name");
-          const mv = evaluate(ast.a, env);
+          const mv = evaluate(ast.args[0], env);
           if (mv.kind !== "matrix") throw new ExprError("eigen expects a matrix");
           const eg = eigen(mv.value);
           eigenRows.add(row.id);
@@ -226,7 +227,15 @@ export default function App() {
 
         const value = evaluate(ast, env);
         if (binding) env.set(binding.name, value);
-        results.set(row.id, { text: valueToText(value) });
+        // A name bound to a plain number ("a = 1.5") gets a slider instead of
+        // a redundant "= 1.5" result line.
+        const isNumericLiteral =
+          ast.t === "num" || (ast.t === "neg" && ast.a.t === "num");
+        if (binding && isNumericLiteral && value.kind === "scalar") {
+          sliders.set(row.id, value.value);
+        } else {
+          results.set(row.id, { text: valueToText(value) });
+        }
 
         if (value.kind === "matrix") {
           const st = buildStages(ast);
@@ -322,6 +331,7 @@ export default function App() {
       stageNamesOf,
       warpables,
       eigenRows,
+      sliders,
     };
   }, [rows, activeId]);
 
@@ -375,6 +385,8 @@ export default function App() {
         row = { id, kind: "matrix", name: nextName(prev, "matrix"), cells: ["1", "0", "0", "1"] };
       else if (kind === "vector")
         row = { id, kind: "vector", name: nextName(prev, "vector"), cells: ["", ""], shown: true };
+      else if (kind === "slider")
+        row = { id, kind: "expr", src: `${nextName(prev, "scalar")} = 1`, shown: true };
       else if (kind === "det")
         row = { id, kind: "expr", src: `det(${firstMatrixName(prev)})`, shown: true };
       else if (kind === "eigen")
@@ -494,6 +506,7 @@ export default function App() {
         colorOf={scene.colorOf}
         warpables={scene.warpables}
         eigenRows={scene.eigenRows}
+        sliders={scene.sliders}
         stageNamesOf={scene.stageNamesOf}
         activeId={activeId}
         t={t}
@@ -503,6 +516,9 @@ export default function App() {
         onDelete={deleteRow}
         onRename={(id, name) => updateRow(id, { name } as Partial<Row>)}
         onExprChange={setExprSrc}
+        onSliderBounds={(id, min, max) =>
+          updateRow(id, { sliderMin: min, sliderMax: max } as Partial<Row>)
+        }
         onMatrixCell={setMatrixCell}
         onVectorCell={setVectorCell}
         onPlay={playWarp}
