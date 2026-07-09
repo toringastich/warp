@@ -24,11 +24,38 @@ import {
   type Mat2,
   type Vec2,
 } from "./matrix";
+import {
+  apply3,
+  det3,
+  inverse3,
+  multiply3,
+  transpose3,
+  type Mat3,
+  type Vec3,
+} from "./matrix3";
 
 export type Value =
   | { kind: "scalar"; value: number }
   | { kind: "vector"; value: Vec2 }
-  | { kind: "matrix"; value: Mat2 };
+  | { kind: "matrix"; value: Mat2 }
+  | { kind: "vector3"; value: Vec3 }
+  | { kind: "matrix3"; value: Mat3 };
+
+/** Human-readable name of a value's type, for error messages. */
+export function kindName(k: Value["kind"]): string {
+  switch (k) {
+    case "scalar":
+      return "number";
+    case "vector":
+      return "2D vector";
+    case "matrix":
+      return "2×2 matrix";
+    case "vector3":
+      return "3D vector";
+    case "matrix3":
+      return "3×3 matrix";
+  }
+}
 
 export type Env = Map<string, Value>;
 
@@ -108,6 +135,7 @@ export type Node =
   | { t: "num"; v: number }
   | { t: "var"; name: string }
   | { t: "vec"; x: Node; y: Node }
+  | { t: "vec3"; x: Node; y: Node; z: Node }
   | { t: "neg"; a: Node }
   | { t: "add"; a: Node; b: Node }
   | { t: "sub"; a: Node; b: Node }
@@ -206,6 +234,12 @@ class Parser {
       if (p?.t === "comma") {
         this.next();
         const second = this.parseExpr();
+        if (this.peek()?.t === "comma") {
+          this.next();
+          const third = this.parseExpr();
+          if (this.next()?.t !== "rp") throw new ExprError("Missing )");
+          return { t: "vec3", x: first, y: second, z: third };
+        }
         if (this.next()?.t !== "rp") throw new ExprError("Missing )");
         return { t: "vec", x: first, y: second };
       }
@@ -227,6 +261,8 @@ export function parse(src: string): Node {
 const scalar = (n: number): Value => ({ kind: "scalar", value: n });
 const vector = (v: Vec2): Value => ({ kind: "vector", value: v });
 const matrix = (m: Mat2): Value => ({ kind: "matrix", value: m });
+const vector3 = (v: Vec3): Value => ({ kind: "vector3", value: v });
+const matrix3 = (m: Mat3): Value => ({ kind: "matrix3", value: m });
 
 function add(a: Value, b: Value, sign: 1 | -1): Value {
   const s = sign;
@@ -234,6 +270,12 @@ function add(a: Value, b: Value, sign: 1 | -1): Value {
     return scalar(a.value + s * b.value);
   if (a.kind === "vector" && b.kind === "vector")
     return vector({ x: a.value.x + s * b.value.x, y: a.value.y + s * b.value.y });
+  if (a.kind === "vector3" && b.kind === "vector3")
+    return vector3({
+      x: a.value.x + s * b.value.x,
+      y: a.value.y + s * b.value.y,
+      z: a.value.z + s * b.value.z,
+    });
   if (a.kind === "matrix" && b.kind === "matrix")
     return matrix([
       a.value[0] + s * b.value[0],
@@ -241,8 +283,14 @@ function add(a: Value, b: Value, sign: 1 | -1): Value {
       a.value[2] + s * b.value[2],
       a.value[3] + s * b.value[3],
     ]);
+  if (a.kind === "matrix3" && b.kind === "matrix3") {
+    const bv = b.value;
+    return matrix3(a.value.map((x, i) => x + s * bv[i]) as unknown as Mat3);
+  }
   const word = s === 1 ? "add" : "subtract";
-  throw new ExprError(`Can't ${word} a ${a.kind} and a ${b.kind}`);
+  throw new ExprError(
+    `Can't ${word} a ${kindName(a.kind)} and a ${kindName(b.kind)}`,
+  );
 }
 
 function mul(a: Value, b: Value): Value {
@@ -252,17 +300,36 @@ function mul(a: Value, b: Value): Value {
     return vector({ x: a.value * b.value.x, y: a.value * b.value.y });
   if (a.kind === "vector" && b.kind === "scalar")
     return vector({ x: a.value.x * b.value, y: a.value.y * b.value });
+  if (a.kind === "scalar" && b.kind === "vector3")
+    return vector3({
+      x: a.value * b.value.x,
+      y: a.value * b.value.y,
+      z: a.value * b.value.z,
+    });
+  if (a.kind === "vector3" && b.kind === "scalar") return mul(b, a);
   if (a.kind === "scalar" && b.kind === "matrix")
     return matrix(b.value.map((x) => a.value * x) as unknown as Mat2);
   if (a.kind === "matrix" && b.kind === "scalar")
     return matrix(a.value.map((x) => x * b.value) as unknown as Mat2);
+  if (a.kind === "scalar" && b.kind === "matrix3")
+    return matrix3(b.value.map((x) => a.value * x) as unknown as Mat3);
+  if (a.kind === "matrix3" && b.kind === "scalar") return mul(b, a);
   if (a.kind === "matrix" && b.kind === "vector")
     return vector(apply(a.value, b.value));
+  if (a.kind === "matrix3" && b.kind === "vector3")
+    return vector3(apply3(a.value, b.value));
   if (a.kind === "matrix" && b.kind === "matrix")
     return matrix(multiply(a.value, b.value));
-  if (a.kind === "vector" && b.kind === "matrix")
+  if (a.kind === "matrix3" && b.kind === "matrix3")
+    return matrix3(multiply3(a.value, b.value));
+  if (
+    (a.kind === "vector" && b.kind === "matrix") ||
+    (a.kind === "vector3" && b.kind === "matrix3")
+  )
     throw new ExprError("Put the matrix on the left of the vector (M·v)");
-  throw new ExprError(`Can't multiply a ${a.kind} and a ${b.kind}`);
+  throw new ExprError(
+    `Can't multiply a ${kindName(a.kind)} and a ${kindName(b.kind)}`,
+  );
 }
 
 export function evaluate(node: Node, env: Env): Value {
@@ -281,6 +348,14 @@ export function evaluate(node: Node, env: Env): Value {
         throw new ExprError("Vector components must be numbers");
       return vector({ x: x.value, y: y.value });
     }
+    case "vec3": {
+      const x = evaluate(node.x, env);
+      const y = evaluate(node.y, env);
+      const z = evaluate(node.z, env);
+      if (x.kind !== "scalar" || y.kind !== "scalar" || z.kind !== "scalar")
+        throw new ExprError("Vector components must be numbers");
+      return vector3({ x: x.value, y: y.value, z: z.value });
+    }
     case "neg": {
       const a = evaluate(node.a, env);
       return mul(scalar(-1), a);
@@ -296,43 +371,73 @@ export function evaluate(node: Node, env: Env): Value {
       switch (node.fn) {
         case "det": {
           const [a] = args;
-          if (a.kind !== "matrix") throw new ExprError("det expects a matrix");
-          return scalar(matDet(a.value));
+          if (a.kind === "matrix") return scalar(matDet(a.value));
+          if (a.kind === "matrix3") return scalar(det3(a.value));
+          throw new ExprError("det expects a matrix");
         }
         case "inv": {
           const [a] = args;
-          if (a.kind !== "matrix") throw new ExprError("inv expects a matrix");
-          const m = inverse(a.value);
+          if (a.kind !== "matrix" && a.kind !== "matrix3")
+            throw new ExprError("inv expects a matrix");
+          const m =
+            a.kind === "matrix" ? inverse(a.value) : inverse3(a.value);
           if (!m) throw new ExprError("Not invertible (det = 0)");
-          return matrix(m);
+          return a.kind === "matrix" ? matrix(m as Mat2) : matrix3(m as Mat3);
         }
         case "transpose": {
           const [a] = args;
-          if (a.kind !== "matrix")
-            throw new ExprError("transpose expects a matrix");
-          return matrix(matTranspose(a.value));
+          if (a.kind === "matrix") return matrix(matTranspose(a.value));
+          if (a.kind === "matrix3") return matrix3(transpose3(a.value));
+          throw new ExprError("transpose expects a matrix");
         }
         case "norm": {
           const [a] = args;
-          if (a.kind !== "vector") throw new ExprError("norm expects a vector");
-          return scalar(Math.hypot(a.value.x, a.value.y));
+          if (a.kind === "vector") return scalar(Math.hypot(a.value.x, a.value.y));
+          if (a.kind === "vector3")
+            return scalar(Math.hypot(a.value.x, a.value.y, a.value.z));
+          throw new ExprError("norm expects a vector");
         }
         case "dot": {
           const [a, b] = args;
-          if (a.kind !== "vector" || b.kind !== "vector")
-            throw new ExprError("dot expects two vectors");
-          return scalar(a.value.x * b.value.x + a.value.y * b.value.y);
+          if (a.kind === "vector" && b.kind === "vector")
+            return scalar(a.value.x * b.value.x + a.value.y * b.value.y);
+          if (a.kind === "vector3" && b.kind === "vector3")
+            return scalar(
+              a.value.x * b.value.x +
+                a.value.y * b.value.y +
+                a.value.z * b.value.z,
+            );
+          throw new ExprError("dot expects two vectors of the same dimension");
         }
         case "proj": {
           // proj(v, w): the projection of v onto w.
           const [a, b] = args;
-          if (a.kind !== "vector" || b.kind !== "vector")
-            throw new ExprError("proj expects two vectors: proj(v, w)");
-          const ww = b.value.x * b.value.x + b.value.y * b.value.y;
-          if (ww < 1e-24)
-            throw new ExprError("Can't project onto the zero vector");
-          const k = (a.value.x * b.value.x + a.value.y * b.value.y) / ww;
-          return vector({ x: k * b.value.x, y: k * b.value.y });
+          if (a.kind === "vector" && b.kind === "vector") {
+            const ww = b.value.x * b.value.x + b.value.y * b.value.y;
+            if (ww < 1e-24)
+              throw new ExprError("Can't project onto the zero vector");
+            const k = (a.value.x * b.value.x + a.value.y * b.value.y) / ww;
+            return vector({ x: k * b.value.x, y: k * b.value.y });
+          }
+          if (a.kind === "vector3" && b.kind === "vector3") {
+            const ww =
+              b.value.x * b.value.x +
+              b.value.y * b.value.y +
+              b.value.z * b.value.z;
+            if (ww < 1e-24)
+              throw new ExprError("Can't project onto the zero vector");
+            const k =
+              (a.value.x * b.value.x +
+                a.value.y * b.value.y +
+                a.value.z * b.value.z) /
+              ww;
+            return vector3({
+              x: k * b.value.x,
+              y: k * b.value.y,
+              z: k * b.value.z,
+            });
+          }
+          throw new ExprError("proj expects two vectors of the same dimension");
         }
         case "eigen":
           // eigen doesn't produce a scalar/vector/matrix, so it can't take

@@ -3,21 +3,25 @@
  * to name them, read their numeric values, and build the evaluation env.
  */
 import { type Mat2, type Vec2 } from "./lib/matrix";
+import { type Mat3, type Vec3 } from "./lib/matrix3";
 import { parseBinding } from "./lib/expr";
 
 export type RowId = string;
+export type Mode = "2d" | "3d";
 
 export interface MatrixRow {
   id: RowId;
   kind: "matrix";
   name: string;
-  cells: [string, string, string, string];
+  /** 4 entries (2D) or 9 entries (3D), row-major. */
+  cells: string[];
 }
 export interface VectorRow {
   id: RowId;
   kind: "vector";
   name: string;
-  cells: [string, string];
+  /** 2 entries (2D) or 3 entries (3D). */
+  cells: string[];
   shown: boolean;
 }
 export interface ExprRow {
@@ -76,6 +80,23 @@ export function cellsToMatrix(c: MatrixRow["cells"]): Mat2 {
 export function cellsToVector(c: VectorRow["cells"]): Vec2 {
   return { x: num(c[0]), y: num(c[1]) };
 }
+export function cellsToMatrix3(c: MatrixRow["cells"]): Mat3 {
+  return c.map(num) as unknown as Mat3;
+}
+export function cellsToVector3(c: VectorRow["cells"]): Vec3 {
+  return { x: num(c[0]), y: num(c[1]), z: num(c[2]) };
+}
+
+/** What a row reports back to the list: an inline value, lines, or an error. */
+export interface ResultLine {
+  text: string;
+  color?: string;
+}
+export interface RowResult {
+  text?: string;
+  lines?: ResultLine[];
+  error?: string;
+}
 
 /** Colors for plotted vectors/results (blue + green are reserved for î, ĵ). */
 export const GRAPH_COLORS = [
@@ -89,3 +110,13 @@ export const GRAPH_COLORS = [
 
 /** Fixed colors for λ₁ / λ₂ so eigen rows always look the same. */
 export const EIGEN_COLORS = ["#e0792b", "#6042a6"];
+
+/** Brighter palette for the dark 3D stage (î/ĵ/k̂ take green/red/blue). */
+export const GRAPH_COLORS_3D = [
+  "#ffb347",
+  "#c792ea",
+  "#4dd0b1",
+  "#f78fb3",
+  "#e6d15a",
+  "#7fb4ff",
+];

@@ -23,6 +23,10 @@ body,
   height: 100%;
 }
 
+.mode-pane {
+  height: 100%;
+}
+
 .app {
   display: flex;
   height: 100vh;
@@ -62,7 +66,31 @@ body,
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0;
-  flex: 1;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: #eef0f3;
+  border-radius: 8px;
+  padding: 2px;
+  margin-right: auto;
+}
+.mode-toggle button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mode-toggle button.on {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* ---------- Gear / palette ---------- */
@@ -302,6 +330,14 @@ body,
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
+.matrix-grid.dim3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.matrix-grid.dim3 .matrix-cell {
+  width: 40px;
+  height: 34px;
+  font-size: 14px;
+}
 .vector-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -445,5 +481,15 @@ body,
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
+}
+.warp-canvas3d {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #101216;
+}
+.warp-canvas3d canvas {
+  display: block;
   touch-action: none;
 }

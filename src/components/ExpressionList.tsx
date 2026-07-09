@@ -1,9 +1,16 @@
 import { useState } from "react";
-import { type RowResult } from "../App";
 import { parseBinding } from "../lib/expr";
-import { type Row, type RowId, type RowKind } from "../rows";
+import {
+  type Mode,
+  type Row,
+  type RowId,
+  type RowKind,
+  type RowResult,
+} from "../rows";
 
 interface Props {
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
   rows: Row[];
   results: Map<RowId, RowResult>;
   colorOf: Map<RowId, string>;
@@ -65,6 +72,7 @@ function niceStep(span: number): number {
 
 export default function ExpressionList(props: Props) {
   const {
+    mode,
     rows,
     results,
     colorOf,
@@ -120,6 +128,17 @@ export default function ExpressionList(props: Props) {
       <header className="brand">
         <span className="brand-mark">▦</span>
         <h1>Warp</h1>
+        <div className="mode-toggle">
+          {(["2d", "3d"] as Mode[]).map((m) => (
+            <button
+              key={m}
+              className={mode === m ? "on" : ""}
+              onClick={() => props.onModeChange(m)}
+            >
+              {m.toUpperCase()}
+            </button>
+          ))}
+        </div>
         <div className="gear-wrap">
           <button
             className="gear"
@@ -175,7 +194,11 @@ export default function ExpressionList(props: Props) {
                       />
                       <span className="eq">=</span>
                       <div className="matrix-bracket">
-                        <div className="matrix-grid">
+                        <div
+                          className={
+                            "matrix-grid" + (row.cells.length === 9 ? " dim3" : "")
+                          }
+                        >
                           {row.cells.map((c, idx) => (
                             <input
                               key={idx}
@@ -388,7 +411,11 @@ export default function ExpressionList(props: Props) {
         })}
       </div>
 
-      <footer className="hint">Drag to pan · scroll to zoom</footer>
+      <footer className="hint">
+        {mode === "3d"
+          ? "Drag to orbit · scroll to zoom"
+          : "Drag to pan · scroll to zoom"}
+      </footer>
     </aside>
   );
 }

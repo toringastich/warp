@@ -12,7 +12,8 @@ Fully client-side; no backend.
 ## Tech stack
 
 - **React + Vite + TypeScript**
-- **HTML5 Canvas** for the graph (grid, vectors, animation)
+- **HTML5 Canvas** for the 2D graph (grid, vectors, animation)
+- **Three.js** for the 3D stage (lazy-loaded only when 3D mode is opened)
 - Hand-rolled math + a small expression engine (no math libraries)
 
 ## Getting started
@@ -31,18 +32,22 @@ npm run build    # type-check + production build
 src/
   lib/
     matrix.ts          Pure 2x2 linear-algebra helpers (no rendering deps)
+    matrix3.ts         Pure 3x3 counterparts (det, inverse, transpose, lerp)
     expr.ts            Tokenizer + recursive-descent parser + typed evaluator
-                       over scalars / vectors / 2x2 matrices
-  rows.ts              Document model: typed rows, auto-naming, env building
+                       over scalars / vectors / matrices in both dimensions
+  rows.ts              Document model: typed rows, auto-naming, shared types
+  format.ts            Value -> display text
   components/
-    ExpressionList.tsx Desmos-style expression list + gear palette + toggles
-    TransformCanvas.tsx Canvas renderer: warped grid, basis vectors, drawables
-  App.tsx              State, scene assembly, animation loop
+    ExpressionList.tsx Desmos-style expression list + palettes + toggles
+    TransformCanvas.tsx   2D canvas: warped grid, basis vectors, drawables
+    TransformCanvas3D.tsx 3D stage: Three.js orbit camera, arrows, unit cube
+  App.tsx              Mode shell + the 2D sandbox
+  Warp3D.tsx           The 3D sandbox
   styles.css
 ```
 
-The design keeps the math (`lib/`) pure and rendering-agnostic so a future 3D
-phase can layer on Three.js without a rewrite.
+The math (`lib/`) stays pure and rendering-agnostic; the 3D phase reuses the
+same expression engine and expression-list UI on top of a Three.js stage.
 
 ## What it does today
 
@@ -83,7 +88,16 @@ phase can layer on Three.js without a rewrite.
 - **Desmos-style visibility toggles** per row; matrices are mutually exclusive.
 - Handles edge cases: det = 0 (collapse to a line) and negative det (flip).
 
+- **3D mode (first version)**: a 2D/3D toggle in the header switches to a
+  Three.js stage — Desmos 3D-style navigation (orbit around the origin, z-up,
+  scroll to zoom) with 3Blue1Brown visuals (dark stage, green/red/blue basis
+  arrows, translucent unit-cube volume = |det|). 3×3 matrices and 3-vectors
+  graph, vectors ride an animated identity → M warp, and the engine built-ins
+  (`det`, `inv`, `transpose`, `dot`, `norm`, `proj`, sliders) all work on 3D
+  values. Both documents stay alive when you switch modes.
+
 ## Roadmap
 
 Warp is deliberately a **sandbox** — a blank canvas you build scenes in, not a
-preset gallery. Next up: shareable URLs, 3D (3×3 matrices), and export.
+preset gallery. Next up: shareable URLs, deeper 3D (warped lattice, eigen,
+composition stages), and export.

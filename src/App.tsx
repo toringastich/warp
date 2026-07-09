@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import TransformCanvas, {
   type Drawable,
   type VectorDrawable,
@@ -31,31 +31,26 @@ import {
   EIGEN_COLORS,
   GRAPH_COLORS,
   nextName,
+  type Mode,
+  type ResultLine,
   type Row,
   type RowId,
   type RowKind,
+  type RowResult,
 } from "./rows";
+import { fmt, valueToText } from "./format";
+
+// Split out so Three.js only downloads when the 3D mode is first opened.
+const Warp3D = lazy(() => import("./Warp3D"));
 
 const ANIM_MS = 1400; // per animation stage
 
 const SUBS = ["₁", "₂"];
 
-function fmt(n: number): string {
-  const r = Math.round(n * 1e6) / 1e6;
-  return Object.is(r, -0) ? "0" : String(r);
-}
-
 /** Rounder display for eigen output, where values are usually irrational. */
 function fmt3(n: number): string {
   const r = Math.round(n * 1e3) / 1e3;
   return Object.is(r, -0) ? "0" : String(r);
-}
-
-function valueToText(v: Value): string {
-  if (v.kind === "scalar") return fmt(v.value);
-  if (v.kind === "vector") return `(${fmt(v.value.x)}, ${fmt(v.value.y)})`;
-  const m = v.value;
-  return `[${fmt(m[0])} ${fmt(m[1])}; ${fmt(m[2])} ${fmt(m[3])}]`;
 }
 
 /**
@@ -70,20 +65,42 @@ function niceDir(v: Vec2): Vec2 {
   return { x: v.x / m, y: v.y / m };
 }
 
-export interface ResultLine {
-  text: string;
-  color?: string;
-}
-export interface RowResult {
-  text?: string;
-  lines?: ResultLine[];
-  error?: string;
-}
-
 let idCounter = 0;
-const newId = (): RowId => `r${++idCounter}`;
+export const newId = (): RowId => `r${++idCounter}`;
 
+/**
+ * The mode shell: both sandboxes stay mounted so switching between 2D and 3D
+ * never loses either document — only one is displayed at a time.
+ */
 export default function App() {
+  const [mode, setMode] = useState<Mode>("2d");
+  const [seen3d, setSeen3d] = useState(false);
+  const changeMode = (m: Mode) => {
+    setMode(m);
+    if (m === "3d") setSeen3d(true);
+  };
+  return (
+    <>
+      <div className="mode-pane" style={{ display: mode === "2d" ? "" : "none" }}>
+        <Warp2D mode={mode} onModeChange={changeMode} />
+      </div>
+      {seen3d && (
+        <div className="mode-pane" style={{ display: mode === "3d" ? "" : "none" }}>
+          <Suspense fallback={null}>
+            <Warp3D mode={mode} onModeChange={changeMode} />
+          </Suspense>
+        </div>
+      )}
+    </>
+  );
+}
+
+export interface SandboxProps {
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
+}
+
+function Warp2D({ mode, onModeChange }: SandboxProps) {
   const [rows, setRows] = useState<Row[]>(() => [
     { id: newId(), kind: "expr", src: "", shown: true },
   ]);
@@ -590,6 +607,8 @@ export default function App() {
   return (
     <div className="app">
       <ExpressionList
+        mode={mode}
+        onModeChange={onModeChange}
         rows={rows}
         results={scene.results}
         colorOf={scene.colorOf}
