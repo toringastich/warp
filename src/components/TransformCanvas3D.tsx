@@ -1,11 +1,14 @@
 /**
- * The 3D stage: a Three.js scene styled after 3Blue1Brown (dark background,
- * fat colored arrows, translucent unit-cube volume) with Desmos 3D-style
- * navigation (orbit around the origin, z-axis up, scroll to zoom).
+ * The 3D stage: a Three.js scene with Desmos-style light theming (to match
+ * the 2D graph), 3b1b-style fat colored arrows, and Desmos 3D navigation
+ * (orbit around the origin, z-axis up, scroll to zoom).
  */
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { apply3, col3, type Mat3, type Vec3 } from "../lib/matrix3";
 
 export interface Vector3Drawable {
@@ -17,19 +20,20 @@ export interface Vector3Drawable {
 }
 export type Drawable3 = Vector3Drawable;
 
-// 3b1b palette: î green, ĵ red, k̂ blue on a near-black stage.
+// Light Desmos-style stage (continuous with the 2D graph); the basis
+// vectors keep the 3b1b palette: î green, ĵ red, k̂ blue.
 const COLORS3 = {
-  bg: 0x101216,
-  grid: 0x272c34,
-  gridCenter: 0x3a414c,
-  axis: 0x8b95a3,
+  bg: 0xffffff,
+  axis: 0x3c4350, // same as the 2D axes
+  axisLabel: "#7a828f",
+  lattice: 0xc6ccd5, // warped lattice lines — light grey for clarity
   iHat: 0x83c167,
   jHat: 0xfc6255,
   kHat: 0x58c4dd,
-  cube: 0xf5d76e,
+  cube: 0x78a05a, // same green as the 2D unit parallelogram
 };
 
-const GRID_EXTENT = 10;
+const AXIS_EXTENT = 5.5; // just past the ±4 lattice, Desmos-style
 
 function toV(v: Vec3): THREE.Vector3 {
   return new THREE.Vector3(v.x, v.y, v.z);
@@ -64,14 +68,14 @@ function makeArrow(vec: Vec3, color: THREE.ColorRepresentation): THREE.Group {
 }
 
 /** A billboarded text label rendered onto a small canvas texture. */
-function makeLabel(text: string, color: string): THREE.Sprite {
-  const pad = 8;
-  const font = "600 44px ui-sans-serif, system-ui, sans-serif";
+function makeLabel(text: string, color: string, height = 0.34): THREE.Sprite {
+  const pad = 10;
+  const font = "600 64px ui-sans-serif, system-ui, sans-serif";
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
   ctx.font = font;
   canvas.width = Math.ceil(ctx.measureText(text).width) + pad * 2;
-  canvas.height = 60;
+  canvas.height = 84;
   ctx.font = font;
   ctx.fillStyle = color;
   ctx.textBaseline = "middle";
@@ -81,9 +85,35 @@ function makeLabel(text: string, color: string): THREE.Sprite {
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: texture, depthTest: false }),
   );
-  const h = 0.34;
-  sprite.scale.set((h * canvas.width) / canvas.height, h, 1);
+  sprite.scale.set((height * canvas.width) / canvas.height, height, 1);
   return sprite;
+}
+
+/**
+ * A fat axis: cylinder shaft spanning -extent..extent with a cone arrowhead
+ * on the positive end, Desmos 3D-style.
+ */
+function makeAxis(end: Vec3, color: THREE.ColorRepresentation): THREE.Group {
+  const group = new THREE.Group();
+  const dir = toV(end);
+  const len = dir.length();
+  const headLen = 0.5;
+  const headR = 0.15;
+  const shaftR = 0.032;
+  const mat = new THREE.MeshBasicMaterial({ color });
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(shaftR, shaftR, 2 * len - headLen, 12),
+    mat,
+  );
+  shaft.position.y = -headLen / 2; // spans -len .. len - headLen
+  const head = new THREE.Mesh(new THREE.ConeGeometry(headR, headLen, 16), mat);
+  head.position.y = len - headLen / 2;
+  group.add(shaft, head);
+  group.quaternion.setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    dir.normalize(),
+  );
+  return group;
 }
 
 /** Dispose everything under a group (geometries, materials, textures). */
@@ -143,30 +173,17 @@ export default function TransformCanvas3D({
     controls.maxDistance = 60;
     controls.zoomSpeed = 1.4;
 
-    // Static furniture: ground grid in the xy-plane + labeled axes.
-    const grid = new THREE.GridHelper(
-      GRID_EXTENT * 2,
-      GRID_EXTENT * 2,
-      COLORS3.gridCenter,
-      COLORS3.grid,
-    );
-    grid.rotation.x = Math.PI / 2; // GridHelper is xz by default
-    scene.add(grid);
-
-    const axisMat = new THREE.LineBasicMaterial({ color: COLORS3.axis });
+    // Static furniture: just the labeled x/y/z axes — the warped lattice
+    // provides all the grid context once a matrix is active.
     const axisEnds: [Vec3, string][] = [
-      [{ x: GRID_EXTENT, y: 0, z: 0 }, "x"],
-      [{ x: 0, y: GRID_EXTENT, z: 0 }, "y"],
-      [{ x: 0, y: 0, z: GRID_EXTENT }, "z"],
+      [{ x: AXIS_EXTENT, y: 0, z: 0 }, "x"],
+      [{ x: 0, y: AXIS_EXTENT, z: 0 }, "y"],
+      [{ x: 0, y: 0, z: AXIS_EXTENT }, "z"],
     ];
     for (const [end, name] of axisEnds) {
-      const geom = new THREE.BufferGeometry().setFromPoints([
-        toV({ x: -end.x, y: -end.y, z: -end.z }),
-        toV(end),
-      ]);
-      scene.add(new THREE.Line(geom, axisMat));
-      const lbl = makeLabel(name, "#aeb7c4");
-      lbl.position.copy(toV(end)).multiplyScalar(1.04);
+      scene.add(makeAxis(end, COLORS3.axis));
+      const lbl = makeLabel(name, COLORS3.axisLabel, 0.7);
+      lbl.position.copy(toV(end)).multiplyScalar(1.09);
       scene.add(lbl);
     }
 
@@ -176,12 +193,42 @@ export default function TransformCanvas3D({
     const dynamic = new THREE.Group();
     scene.add(dynamic);
 
+    // Viewport size in CSS pixels — LineMaterial needs it to size fat lines.
+    const viewSize = new THREE.Vector2(1, 1);
+
     function sync() {
       disposeDeep(dynamic);
       dynamic.clear();
       const M = warpRef.current;
 
       if (activeRef.current) {
+        // Warped lattice. A linear map keeps lines straight, so each lattice
+        // line is just a segment between its two warped endpoints. Rendered
+        // with LineSegments2 so the lines have a real pixel width.
+        const L = 4;
+        const latticePos: number[] = [];
+        const seg = (a: Vec3, b: Vec3) => {
+          const wa = apply3(M, a);
+          const wb = apply3(M, b);
+          latticePos.push(wa.x, wa.y, wa.z, wb.x, wb.y, wb.z);
+        };
+        for (let a = -L; a <= L; a++)
+          for (let b = -L; b <= L; b++) {
+            seg({ x: -L, y: a, z: b }, { x: L, y: a, z: b });
+            seg({ x: a, y: -L, z: b }, { x: a, y: L, z: b });
+            seg({ x: a, y: b, z: -L }, { x: a, y: b, z: L });
+          }
+        const latticeGeom = new LineSegmentsGeometry();
+        latticeGeom.setPositions(latticePos);
+        const latticeMat = new LineMaterial({
+          color: COLORS3.lattice,
+          transparent: true,
+          opacity: 0.6,
+          linewidth: 1.2, // px
+        });
+        latticeMat.resolution.copy(viewSize);
+        dynamic.add(new LineSegments2(latticeGeom, latticeMat));
+
         // Warped unit cube (the parallelepiped whose volume is |det|).
         const corners: THREE.Vector3[] = [];
         for (let i = 0; i < 8; i++)
@@ -262,6 +309,8 @@ export default function TransformCanvas3D({
       renderer.setSize(rect.width, rect.height);
       camera.aspect = rect.width / rect.height;
       camera.updateProjectionMatrix();
+      viewSize.set(rect.width, rect.height);
+      sync(); // rebuild so the lattice material picks up the new resolution
     }
     const ro = new ResizeObserver(resize);
     ro.observe(container);

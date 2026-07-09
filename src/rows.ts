@@ -110,13 +110,3 @@ export const GRAPH_COLORS = [
 
 /** Fixed colors for λ₁ / λ₂ so eigen rows always look the same. */
 export const EIGEN_COLORS = ["#e0792b", "#6042a6"];
-
-/** Brighter palette for the dark 3D stage (î/ĵ/k̂ take green/red/blue). */
-export const GRAPH_COLORS_3D = [
-  "#ffb347",
-  "#c792ea",
-  "#4dd0b1",
-  "#f78fb3",
-  "#e6d15a",
-  "#7fb4ff",
-];

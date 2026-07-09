@@ -88,13 +88,16 @@ same expression engine and expression-list UI on top of a Three.js stage.
 - **Desmos-style visibility toggles** per row; matrices are mutually exclusive.
 - Handles edge cases: det = 0 (collapse to a line) and negative det (flip).
 
-- **3D mode (first version)**: a 2D/3D toggle in the header switches to a
-  Three.js stage — Desmos 3D-style navigation (orbit around the origin, z-up,
-  scroll to zoom) with 3Blue1Brown visuals (dark stage, green/red/blue basis
-  arrows, translucent unit-cube volume = |det|). 3×3 matrices and 3-vectors
-  graph, vectors ride an animated identity → M warp, and the engine built-ins
-  (`det`, `inv`, `transpose`, `dot`, `norm`, `proj`, sliders) all work on 3D
-  values. Both documents stay alive when you switch modes.
+- **3D mode**: a 2D/3D toggle in the header switches to a Three.js stage —
+  Desmos 3D-style navigation (orbit around the origin, z-up, scroll to zoom)
+  and a light theme continuous with the 2D graph: fat grey axes with
+  arrowheads and x/y/z labels, 3b1b basis arrows (î green, ĵ red, k̂ blue),
+  and the unit cube in the same green as the 2D parallelogram, warping to the
+  parallelepiped whose volume is |det|. A ±4 lattice of light-grey gridlines
+  warps with the matrix (lines stay straight — it's linear!), vectors ride the
+  animated identity → M warp and relabel as their image (`M·v = …`), and the
+  engine built-ins (`det`, `inv`, `transpose`, `dot`, `norm`, `proj`, sliders)
+  all work on 3D values. Both documents stay alive when you switch modes.
 
 ## Roadmap
 

@@ -7,9 +7,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import TransformCanvas3D, {
   type Drawable3,
+  type Vector3Drawable,
 } from "./components/TransformCanvas3D";
 import ExpressionList from "./components/ExpressionList";
-import { IDENTITY3, lerp3, type Mat3 } from "./lib/matrix3";
+import { apply3, IDENTITY3, lerp3, type Mat3 } from "./lib/matrix3";
 import {
   evaluate,
   ExprError,
@@ -21,14 +22,14 @@ import {
 import {
   cellsToMatrix3,
   cellsToVector3,
-  GRAPH_COLORS_3D,
+  GRAPH_COLORS,
   nextName,
   type Row,
   type RowId,
   type RowKind,
   type RowResult,
 } from "./rows";
-import { valueToText } from "./format";
+import { fmt, valueToText } from "./format";
 import { newId, type SandboxProps } from "./App";
 
 const ANIM_MS = 1400;
@@ -52,9 +53,10 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
     const targetOf = new Map<RowId, Mat3>(); // rows that can drive the warp
     const warpables = new Set<RowId>();
     const sliders = new Map<RowId, number>();
+    const ridingVectors = new Map<RowId, Vector3Drawable>();
     const env: Env = new Map();
     let ci = 0;
-    const nextColor = () => GRAPH_COLORS_3D[ci++ % GRAPH_COLORS_3D.length];
+    const nextColor = () => GRAPH_COLORS[ci++ % GRAPH_COLORS.length];
 
     const nameOwner = new Map<string, RowId>();
     for (const row of rows) {
@@ -118,14 +120,17 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
         }
         const color = nextColor();
         colorOf.set(row.id, color);
-        if (row.shown)
-          drawables.push({
+        if (row.shown) {
+          const d: Vector3Drawable = {
             kind: "vector",
             vec: cellsToVector3(row.cells),
             color,
             ride: true,
             label: row.name,
-          });
+          };
+          drawables.push(d);
+          ridingVectors.set(row.id, d);
+        }
         continue;
       }
 
@@ -174,8 +179,44 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
       }
     }
 
+    // While a warp is active, shown vectors ride it — relabel each one as its
+    // image ("M·v") and report where it lands, mirroring the 2D behavior.
+    const active = activeId ? rows.find((r) => r.id === activeId) : undefined;
+    const target = activeId ? targetOf.get(activeId) : undefined;
+    if (active && target) {
+      let warpName: string;
+      if (active.kind === "matrix") {
+        warpName = active.name;
+      } else {
+        const b = active.kind === "expr" ? parseBinding(active.src) : null;
+        if (b) warpName = b.name;
+        else {
+          const s = (active.kind === "expr" ? active.src : "")
+            .trim()
+            .replace(/[*×•]/g, "·");
+          warpName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : `(${s})`;
+        }
+      }
+      for (const row of rows) {
+        if (row.kind !== "vector" || !row.shown || row.id === activeId) continue;
+        const d = ridingVectors.get(row.id);
+        if (!d) continue; // no drawable (e.g. name clash) — keep its error
+        const image = apply3(target, cellsToVector3(row.cells));
+        const lbl = `${warpName}·${row.name}`;
+        d.label = lbl;
+        results.set(row.id, {
+          lines: [
+            {
+              text: `${lbl} = (${fmt(image.x)}, ${fmt(image.y)}, ${fmt(image.z)})`,
+              color: colorOf.get(row.id),
+            },
+          ],
+        });
+      }
+    }
+
     return { drawables, results, colorOf, targetOf, warpables, sliders };
-  }, [rows]);
+  }, [rows, activeId]);
 
   const activeTarget = useMemo(
     () => (activeId ? scene.targetOf.get(activeId) ?? null : null),
