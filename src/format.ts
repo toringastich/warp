@@ -14,6 +14,8 @@ export function polyText(p: P.Poly): string {
 
 export function valueToText(v: Value): string {
   switch (v.kind) {
+    case "del":
+      return "∇ — use dot(del, F) or cross(del, F)";
     case "scalar":
       return polyText(v.value);
     case "vector":

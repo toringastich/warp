@@ -45,7 +45,10 @@ export type Value =
   | { kind: "vector"; value: PVec2 }
   | { kind: "matrix"; value: PMat2 }
   | { kind: "vector3"; value: PVec3 }
-  | { kind: "matrix3"; value: PMat3 };
+  | { kind: "matrix3"; value: PMat3 }
+  // The del operator ∇ — only meaningful inside dot(del, F) (divergence)
+  // and cross(del, F) (curl); everywhere else it's a typed error.
+  | { kind: "del" };
 
 /** Human-readable name of a value's type, for error messages. */
 export function kindName(k: Value["kind"]): string {
@@ -60,6 +63,8 @@ export function kindName(k: Value["kind"]): string {
       return "3D vector";
     case "matrix3":
       return "3×3 matrix";
+    case "del":
+      return "del operator";
   }
 }
 
@@ -433,11 +438,12 @@ function mul(a: Value, b: Value): Value {
 
 const SYMBOLS: Record<string, 0 | 1 | 2> = { x: 0, y: 1, z: 2 };
 
-/** A name is either bound in the env or one of the symbols x, y, z. */
+/** A name is either bound in the env, a symbol x/y/z, or the del operator. */
 function resolveName(name: string, env: Env): Value | null {
   const v = env.get(name);
   if (v) return v;
   if (name in SYMBOLS) return scalar(P.symbol(SYMBOLS[name]));
+  if (name === "del") return { kind: "del" };
   return null;
 }
 
@@ -575,6 +581,21 @@ export function evaluate(node: Node, env: Env): Value {
         }
         case "dot": {
           const [a, b] = args;
+          if (a.kind === "del") {
+            // Divergence: ∇·F = ∂F₁/∂x + ∂F₂/∂y (+ ∂F₃/∂z).
+            if (b.kind === "vector")
+              return scalar(P.add(P.diff(b.value.x, 0), P.diff(b.value.y, 1)));
+            if (b.kind === "vector3")
+              return scalar(
+                P.add(
+                  P.add(P.diff(b.value.x, 0), P.diff(b.value.y, 1)),
+                  P.diff(b.value.z, 2),
+                ),
+              );
+            throw new ExprError("dot(del, F) expects a vector field F");
+          }
+          if (b.kind === "del")
+            throw new ExprError("Put del first: dot(del, F)");
           if (a.kind === "vector" && b.kind === "vector")
             return scalar(
               P.add(P.mul(a.value.x, b.value.x), P.mul(a.value.y, b.value.y)),
@@ -593,6 +614,24 @@ export function evaluate(node: Node, env: Env): Value {
         }
         case "cross": {
           const [a, b] = args;
+          if (a.kind === "del") {
+            // Curl: in 2D the scalar ∂F₂/∂x − ∂F₁/∂y; in 3D the full ∇×F.
+            if (b.kind === "vector")
+              return scalar(
+                P.add(P.diff(b.value.y, 0), P.diff(b.value.x, 1), -1),
+              );
+            if (b.kind === "vector3") {
+              const F = b.value;
+              return vector3({
+                x: P.add(P.diff(F.z, 1), P.diff(F.y, 2), -1),
+                y: P.add(P.diff(F.x, 2), P.diff(F.z, 0), -1),
+                z: P.add(P.diff(F.y, 0), P.diff(F.x, 1), -1),
+              });
+            }
+            throw new ExprError("cross(del, F) expects a vector field F");
+          }
+          if (b.kind === "del")
+            throw new ExprError("Put del first: cross(del, F)");
           if (a.kind === "vector" && b.kind === "vector")
             // 2D cross: the scalar v.x·w.y − v.y·w.x (the signed area of the
             // parallelogram; equivalently det([v w])).
@@ -664,6 +703,7 @@ export const RESERVED_NAMES = new Set([
   "x",
   "y",
   "z",
+  "del",
 ]);
 
 /**

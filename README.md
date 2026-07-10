@@ -70,6 +70,11 @@ same expression engine and expression-list UI on top of a Three.js stage.
   Desmos-style implicit products (`xy`, `2ax`), and sliders folding in as
   numeric coefficients. Anything containing a symbol computes but doesn't
   graph; `inv`/`norm`/`eigen` ask for numeric input.
+- **Vector calculus**: the del operator — `dot(del, F)` is the divergence of
+  a polynomial vector field and `cross(del, F)` its curl (scalar in 2D, full
+  vector in 3D), for literal fields or named rows. Constant results graph:
+  `cross(del, (-y, x, 0))` draws the rotation axis (0, 0, 2). Identities hold
+  symbolically — curl of a gradient and divergence of a curl are 0.
 - **Sliders**: binding a name to a number (`a = 1.5`) turns the row into a
   Desmos-style slider with editable bounds; every expression using it — and
   the active warp — updates live as you drag (`a·M`, `a·v + w`, …).

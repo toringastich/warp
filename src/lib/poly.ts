@@ -70,6 +70,19 @@ export function pow(p: Poly, n: number): Poly {
   return out;
 }
 
+/** Partial derivative with respect to x (axis 0), y (1), or z (2). */
+export function diff(p: Poly, axis: 0 | 1 | 2): Poly {
+  const out = new Map<string, number>();
+  for (const [k, c] of p) {
+    const e = k.split(",").map(Number);
+    const n = e[axis];
+    if (n === 0) continue;
+    e[axis] = n - 1;
+    out.set(e.join(","), c * n);
+  }
+  return out;
+}
+
 const SUP = ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"];
 const sup = (n: number): string =>
   String(n)

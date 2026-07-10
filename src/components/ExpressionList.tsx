@@ -53,6 +53,8 @@ const FUNCTIONS: { label: string; insert: string }[] = [
   { label: "transpose( )", insert: "transpose()" },
   { label: "dot( , )", insert: "dot(, )" },
   { label: "cross( , )", insert: "cross(, )" },
+  { label: "dot(del, ) — divergence", insert: "dot(del, )" },
+  { label: "cross(del, ) — curl", insert: "cross(del, )" },
   { label: "norm( )", insert: "norm()" },
   { label: "proj( , )", insert: "proj(, )" },
 ];
