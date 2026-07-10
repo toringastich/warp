@@ -18,6 +18,9 @@ import { type Poly } from "./lib/poly";
 export type RowId = string;
 export type Mode = "2d" | "3d";
 
+let idCounter = 0;
+export const newId = (): RowId => `r${++idCounter}`;
+
 export interface MatrixRow {
   id: RowId;
   kind: "matrix";

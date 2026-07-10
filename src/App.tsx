@@ -1,4 +1,13 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import TransformCanvas, {
   type Drawable,
   type VectorDrawable,
@@ -33,6 +42,7 @@ import {
   cellsToPVec2,
   EIGEN_COLORS,
   GRAPH_COLORS,
+  newId,
   nextName,
   type Mode,
   type ResultLine,
@@ -42,6 +52,12 @@ import {
   type RowResult,
 } from "./rows";
 import { fmt, valueToText } from "./format";
+import {
+  encodeState,
+  loadInitialState,
+  LS_KEY,
+  type Doc,
+} from "./persist";
 
 // Split out so Three.js only downloads when the 3D mode is first opened.
 const Warp3D = lazy(() => import("./Warp3D"));
@@ -68,29 +84,184 @@ function niceDir(v: Vec2): Vec2 {
   return { x: v.x / m, y: v.y / m };
 }
 
-let idCounter = 0;
-export const newId = (): RowId => `r${++idCounter}`;
+const INITIAL = loadInitialState();
+const MAX_UNDO = 200;
+const COMMIT_MS = 400; // rapid edits within this window form one undo step
+
+/**
+ * A document with an undo/redo history. Snapshots are just references to the
+ * immutable rows arrays, committed after a quiet period so typing "1.5"
+ * undoes as one step, not four.
+ */
+function useUndoableDoc(initial: Doc) {
+  const [rows, setRows] = useState<Row[]>(initial.rows);
+  const [activeId, setActiveId] = useState<RowId | null>(initial.active);
+  const past = useRef<Doc[]>([]);
+  const future = useRef<Doc[]>([]);
+  const current = useRef<Doc>(initial);
+  const restoring = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [, bump] = useState(0);
+
+  const live = useRef<Doc>({ rows, active: activeId });
+  live.current = { rows, active: activeId };
+
+  const commit = () => {
+    timer.current = null;
+    past.current.push(current.current);
+    if (past.current.length > MAX_UNDO) past.current.shift();
+    current.current = live.current;
+    future.current = [];
+    bump((n) => n + 1);
+  };
+
+  useEffect(() => {
+    if (restoring.current) {
+      restoring.current = false;
+      current.current = live.current;
+      return;
+    }
+    if (
+      rows === current.current.rows &&
+      activeId === current.current.active
+    )
+      return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(commit, COMMIT_MS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, activeId]);
+
+  const flush = () => {
+    if (!timer.current) return;
+    clearTimeout(timer.current);
+    commit();
+  };
+  const restore = (doc: Doc) => {
+    current.current = doc;
+    restoring.current = true;
+    setRows(doc.rows);
+    setActiveId(doc.active);
+    bump((n) => n + 1);
+  };
+  const undo = () => {
+    flush();
+    const prev = past.current.pop();
+    if (!prev) return;
+    future.current.push(current.current);
+    restore(prev);
+  };
+  const redo = () => {
+    flush(); // pending edits invalidate the redo stack anyway
+    const next = future.current.pop();
+    if (!next) return;
+    past.current.push(current.current);
+    restore(next);
+  };
+
+  return {
+    rows,
+    setRows,
+    activeId,
+    setActiveId,
+    undo,
+    redo,
+    canUndo: past.current.length > 0 || timer.current !== null,
+    canRedo: future.current.length > 0,
+  };
+}
 
 /**
  * The mode shell: both sandboxes stay mounted so switching between 2D and 3D
- * never loses either document — only one is displayed at a time.
+ * never loses either document — only one is displayed at a time. The whole
+ * app state lives here so it can round-trip through the URL hash and
+ * localStorage (see persist.ts) and drive per-document undo/redo.
  */
 export default function App() {
-  const [mode, setMode] = useState<Mode>("2d");
-  const [seen3d, setSeen3d] = useState(false);
+  const [mode, setMode] = useState<Mode>(INITIAL.mode);
+  const [seen3d, setSeen3d] = useState(INITIAL.mode === "3d");
+  const doc2 = useUndoableDoc(INITIAL.d2);
+  const doc3 = useUndoableDoc(INITIAL.d3);
   const changeMode = (m: Mode) => {
     setMode(m);
     if (m === "3d") setSeen3d(true);
   };
+
+  const encode = () =>
+    encodeState(
+      mode,
+      { rows: doc2.rows, active: doc2.activeId },
+      { rows: doc3.rows, active: doc3.activeId },
+    );
+
+  // The URL hash and localStorage mirror the current state (debounced), so
+  // the address bar is always a share link and reloads restore the session.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const enc = encode();
+      window.history.replaceState(null, "", "#s=" + enc);
+      try {
+        localStorage.setItem(LS_KEY, enc);
+      } catch {
+        // storage unavailable (private mode etc.)
+      }
+    }, COMMIT_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, doc2.rows, doc2.activeId, doc3.rows, doc3.activeId]);
+
+  // Cmd/Ctrl+Z undo, Shift+Cmd+Z / Ctrl+Y redo — on the visible document.
+  const activeDocRef = useRef(doc2);
+  activeDocRef.current = mode === "2d" ? doc2 : doc3;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        e.preventDefault();
+        if (e.shiftKey) activeDocRef.current.redo();
+        else activeDocRef.current.undo();
+      } else if (k === "y") {
+        e.preventDefault();
+        activeDocRef.current.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const share = () => {
+    const enc = encode();
+    window.history.replaceState(null, "", "#s=" + enc);
+    try {
+      localStorage.setItem(LS_KEY, enc);
+    } catch {
+      // storage unavailable
+    }
+    navigator.clipboard?.writeText(window.location.href);
+  };
+
+  const docProps = (doc: ReturnType<typeof useUndoableDoc>) => ({
+    onModeChange: changeMode,
+    rows: doc.rows,
+    setRows: doc.setRows,
+    activeId: doc.activeId,
+    setActiveId: doc.setActiveId,
+    onUndo: doc.undo,
+    onRedo: doc.redo,
+    canUndo: doc.canUndo,
+    canRedo: doc.canRedo,
+    onShare: share,
+  });
+
   return (
     <>
       <div className="mode-pane" style={{ display: mode === "2d" ? "" : "none" }}>
-        <Warp2D mode={mode} onModeChange={changeMode} />
+        <Warp2D mode={mode} {...docProps(doc2)} />
       </div>
       {seen3d && (
         <div className="mode-pane" style={{ display: mode === "3d" ? "" : "none" }}>
           <Suspense fallback={null}>
-            <Warp3D mode={mode} onModeChange={changeMode} />
+            <Warp3D mode={mode} {...docProps(doc3)} />
           </Suspense>
         </div>
       )}
@@ -101,13 +272,30 @@ export default function App() {
 export interface SandboxProps {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
+  rows: Row[];
+  setRows: Dispatch<SetStateAction<Row[]>>;
+  activeId: RowId | null;
+  setActiveId: Dispatch<SetStateAction<RowId | null>>;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onShare: () => void;
 }
 
-function Warp2D({ mode, onModeChange }: SandboxProps) {
-  const [rows, setRows] = useState<Row[]>(() => [
-    { id: newId(), kind: "expr", src: "", shown: true },
-  ]);
-  const [activeId, setActiveId] = useState<RowId | null>(null);
+function Warp2D({
+  mode,
+  onModeChange,
+  rows,
+  setRows,
+  activeId,
+  setActiveId,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onShare,
+}: SandboxProps) {
   const [t, setT] = useState(1);
   const [playing, setPlaying] = useState(false);
 
@@ -635,6 +823,11 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
       <ExpressionList
         mode={mode}
         onModeChange={onModeChange}
+        onUndo={onUndo}
+        onRedo={onRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onShare={onShare}
         rows={rows}
         results={scene.results}
         colorOf={scene.colorOf}

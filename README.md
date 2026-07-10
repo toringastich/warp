@@ -100,6 +100,11 @@ same expression engine and expression-list UI on top of a Three.js stage.
 - **Desmos-style visibility toggles** per row; matrices are mutually exclusive.
 - Handles edge cases: det = 0 (collapse to a line) and negative det (flip).
 
+- **Save, share, undo**: the whole sandbox (both documents + mode) serializes
+  into the URL hash on every change and persists to localStorage — reloads
+  restore your session, and copying the address bar (or the ⧉ header button)
+  shares exactly what you built. Per-document undo/redo (⌘Z / ⇧⌘Z, or the
+  header arrows) with rapid edits grouped into single steps. No backend.
 - **3D mode**: a 2D/3D toggle in the header switches to a Three.js stage —
   Desmos 3D-style navigation (orbit around the origin, z-up, scroll to zoom)
   and a light theme continuous with the 2D graph: fat grey axes with

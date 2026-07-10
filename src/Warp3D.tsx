@@ -26,6 +26,7 @@ import {
   cellsToPMat3,
   cellsToPVec3,
   GRAPH_COLORS,
+  newId,
   nextName,
   type Row,
   type RowId,
@@ -33,18 +34,26 @@ import {
   type RowResult,
 } from "./rows";
 import { fmt, valueToText } from "./format";
-import { newId, type SandboxProps } from "./App";
+import { type SandboxProps } from "./App";
 
 const ANIM_MS = 1400;
 
 const EMPTY_SET = new Set<RowId>();
 const EMPTY_MAP = new Map<RowId, string[]>();
 
-export default function Warp3D({ mode, onModeChange }: SandboxProps) {
-  const [rows, setRows] = useState<Row[]>(() => [
-    { id: newId(), kind: "expr", src: "", shown: true },
-  ]);
-  const [activeId, setActiveId] = useState<RowId | null>(null);
+export default function Warp3D({
+  mode,
+  onModeChange,
+  rows,
+  setRows,
+  activeId,
+  setActiveId,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onShare,
+}: SandboxProps) {
   const [t, setT] = useState(1);
   const [playing, setPlaying] = useState(false);
 
@@ -393,6 +402,11 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
       <ExpressionList
         mode={mode}
         onModeChange={onModeChange}
+        onUndo={onUndo}
+        onRedo={onRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onShare={onShare}
         rows={rows}
         results={scene.results}
         colorOf={scene.colorOf}

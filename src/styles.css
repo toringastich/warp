@@ -122,6 +122,14 @@ body,
   height: 24px;
   font-size: 13px;
 }
+.gear:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.gear:disabled:hover {
+  background: #fff;
+  border-color: var(--line);
+}
 .palette {
   position: absolute;
   right: 0;

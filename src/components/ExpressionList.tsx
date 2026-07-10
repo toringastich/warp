@@ -11,6 +11,12 @@ import {
 interface Props {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Refresh the URL hash with the current state and copy it. */
+  onShare: () => void;
   rows: Row[];
   results: Map<RowId, RowResult>;
   colorOf: Map<RowId, string>;
@@ -89,6 +95,13 @@ export default function ExpressionList(props: Props) {
     playing,
   } = props;
   const [openGear, setOpenGear] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = () => {
+    props.onShare();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
 
   const pick = (kind: RowKind, afterId?: RowId) => {
     props.onAdd(kind, afterId);
@@ -142,6 +155,29 @@ export default function ExpressionList(props: Props) {
             </button>
           ))}
         </div>
+        <button
+          className="gear gear-sm"
+          title="Undo (⌘Z)"
+          disabled={!props.canUndo}
+          onClick={props.onUndo}
+        >
+          ↺
+        </button>
+        <button
+          className="gear gear-sm"
+          title="Redo (⇧⌘Z)"
+          disabled={!props.canRedo}
+          onClick={props.onRedo}
+        >
+          ↻
+        </button>
+        <button
+          className="gear gear-sm"
+          title="Copy a shareable link to this graph"
+          onClick={handleShare}
+        >
+          {copied ? "✓" : "⧉"}
+        </button>
         <div className="gear-wrap">
           <button
             className="gear"
