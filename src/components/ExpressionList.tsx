@@ -52,6 +52,7 @@ const FUNCTIONS: { label: string; insert: string }[] = [
   { label: "inv( )", insert: "inv()" },
   { label: "transpose( )", insert: "transpose()" },
   { label: "dot( , )", insert: "dot(, )" },
+  { label: "cross( , )", insert: "cross(, )" },
   { label: "norm( )", insert: "norm()" },
   { label: "proj( , )", insert: "proj(, )" },
 ];

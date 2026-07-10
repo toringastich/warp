@@ -2,9 +2,18 @@
  * The sandbox's document model: an ordered list of typed rows, plus helpers
  * to name them, read their numeric values, and build the evaluation env.
  */
-import { type Mat2, type Vec2 } from "./lib/matrix";
-import { type Mat3, type Vec3 } from "./lib/matrix3";
-import { parseBinding } from "./lib/expr";
+import {
+  evaluate,
+  parse,
+  parseBinding,
+  type Env,
+  type PMat2,
+  type PMat3,
+  type PVec2,
+  type PVec3,
+} from "./lib/expr";
+import * as P from "./lib/poly";
+import { type Poly } from "./lib/poly";
 
 export type RowId = string;
 export type Mode = "2d" | "3d";
@@ -69,22 +78,36 @@ export function firstMatrixName(rows: Row[]): string {
   return m?.name ?? "M";
 }
 
-const num = (s: string): number => {
-  const f = parseFloat(s);
-  return Number.isFinite(f) ? f : 0;
-};
+const EMPTY_ENV: Env = new Map();
 
-export function cellsToMatrix(c: MatrixRow["cells"]): Mat2 {
-  return [num(c[0]), num(c[1]), num(c[2]), num(c[3])];
+/**
+ * A cell is a tiny expression: "1.5", "2x", "2^0.5"… (no references to other
+ * rows). Unreadable or non-scalar input falls back to 0, like the old
+ * parseFloat behavior for garbage — mid-typing states shouldn't shout.
+ */
+export function cellPoly(s: string): Poly {
+  const t = s.trim();
+  if (!t) return P.constant(0);
+  try {
+    const v = evaluate(parse(t), EMPTY_ENV);
+    if (v.kind === "scalar") return v.value;
+  } catch {
+    // fall through
+  }
+  return P.constant(0);
 }
-export function cellsToVector(c: VectorRow["cells"]): Vec2 {
-  return { x: num(c[0]), y: num(c[1]) };
+
+export function cellsToPMat2(c: MatrixRow["cells"]): PMat2 {
+  return c.map(cellPoly) as unknown as PMat2;
 }
-export function cellsToMatrix3(c: MatrixRow["cells"]): Mat3 {
-  return c.map(num) as unknown as Mat3;
+export function cellsToPVec2(c: VectorRow["cells"]): PVec2 {
+  return { x: cellPoly(c[0]), y: cellPoly(c[1]) };
 }
-export function cellsToVector3(c: VectorRow["cells"]): Vec3 {
-  return { x: num(c[0]), y: num(c[1]), z: num(c[2]) };
+export function cellsToPMat3(c: MatrixRow["cells"]): PMat3 {
+  return c.map(cellPoly) as unknown as PMat3;
+}
+export function cellsToPVec3(c: VectorRow["cells"]): PVec3 {
+  return { x: cellPoly(c[0]), y: cellPoly(c[1]), z: cellPoly(c[2]) };
 }
 
 /** What a row reports back to the list: an inline value, lines, or an error. */

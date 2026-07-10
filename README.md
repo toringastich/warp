@@ -59,10 +59,17 @@ same expression engine and expression-list UI on top of a Three.js stage.
   `(a, b)`, implicit multiplication, and variable references over scalars /
   vectors / 2×2 matrices — so `M·v`, `M·N`, `det(M)`, `v + w` all work, with
   typed error messages and inline results. Built-ins: `det()`, `eigen()`,
-  `inv()`, `transpose()`, `dot(v, w)`, `norm(v)`, and `proj(v, w)` (projection
-  of v onto w). Graphing `proj(v, w)` draws the line through w, a ghost of v,
-  and the perpendicular drop — with a play button that animates v falling onto
-  its projection.
+  `inv()`, `transpose()`, `dot(v, w)`, `cross(v, w)` (scalar signed area in
+  2D; in 3D a vector graphed with the parallelogram it measures), `norm(v)`,
+  and `proj(v, w)` (projection of v onto w). Graphing `proj(v, w)` draws the
+  line through w, a ghost of v, and the perpendicular drop — with a play
+  button that animates v falling onto its projection.
+- **Symbolic algebra**: every scalar slot is a polynomial in `x, y, z`, so
+  `v = (2x, 3y)`, `w = (x^2, xy)`, `dot(v, w) = 2x³ + 3xy²` just work — in
+  expression rows or typed straight into vector/matrix cells. `^` powers,
+  Desmos-style implicit products (`xy`, `2ax`), and sliders folding in as
+  numeric coefficients. Anything containing a symbol computes but doesn't
+  graph; `inv`/`norm`/`eigen` ask for numeric input.
 - **Sliders**: binding a name to a number (`a = 1.5`) turns the row into a
   Desmos-style slider with editable bounds; every expression using it — and
   the active warp — updates live as you drag (`a·M`, `a·v + w`, …).

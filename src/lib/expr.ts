@@ -1,45 +1,51 @@
 /**
  * A tiny expression engine for Warp's sandbox.
  *
- * It parses and evaluates expressions over a three-type algebra:
- *   - scalar  (a number)
- *   - vector  (a 2D vector)
- *   - matrix  (a 2x2 matrix)
+ * It parses and evaluates expressions over a typed algebra of scalars,
+ * 2D/3D vectors, and 2x2/3x3 matrices. Every scalar slot is a polynomial in
+ * the symbols x, y, z (see poly.ts) — a plain number is just a constant
+ * polynomial — so symbolic values like (2x, 3y) flow through +, −, ×, dot,
+ * cross, det, and transpose by the ordinary rules of algebra. Operations
+ * that genuinely need numbers (inv, norm, eigen, projecting onto w) say so.
  *
  * Supported syntax:
- *   + - * (and the · glyph) , unary minus, parentheses,
- *   vector literals (a, b), function calls (det, eigen, inv, transpose,
- *   dot, norm, proj), and variable references.
- *   Juxtaposition means multiplication: "2v", "2(v + w)".
+ *   + - * (and the · glyph), ^ powers, unary minus, parentheses,
+ *   vector literals (a, b) / (a, b, c), function calls (det, eigen, inv,
+ *   transpose, dot, cross, norm, proj), and variable references.
+ *   Juxtaposition means multiplication: "2v", "2(v + w)", "xy" = x·y.
  *
  * Like everything in lib/, this is pure and rendering-agnostic.
  */
 
-import {
-  apply,
-  det as matDet,
-  inverse,
-  multiply,
-  transpose as matTranspose,
-  type Mat2,
-  type Vec2,
-} from "./matrix";
-import {
-  apply3,
-  det3,
-  inverse3,
-  multiply3,
-  transpose3,
-  type Mat3,
-  type Vec3,
-} from "./matrix3";
+import { inverse, type Mat2, type Vec2 } from "./matrix";
+import { inverse3, type Mat3, type Vec3 } from "./matrix3";
+import * as P from "./poly";
+import { type Poly } from "./poly";
+
+// Symbolic containers: same shapes as matrix.ts/matrix3.ts, but every slot
+// is a polynomial instead of a number.
+export interface PVec2 {
+  x: Poly;
+  y: Poly;
+}
+export interface PVec3 {
+  x: Poly;
+  y: Poly;
+  z: Poly;
+}
+export type PMat2 = readonly [Poly, Poly, Poly, Poly];
+export type PMat3 = readonly [
+  Poly, Poly, Poly,
+  Poly, Poly, Poly,
+  Poly, Poly, Poly,
+];
 
 export type Value =
-  | { kind: "scalar"; value: number }
-  | { kind: "vector"; value: Vec2 }
-  | { kind: "matrix"; value: Mat2 }
-  | { kind: "vector3"; value: Vec3 }
-  | { kind: "matrix3"; value: Mat3 };
+  | { kind: "scalar"; value: Poly }
+  | { kind: "vector"; value: PVec2 }
+  | { kind: "matrix"; value: PMat2 }
+  | { kind: "vector3"; value: PVec3 }
+  | { kind: "matrix3"; value: PMat3 };
 
 /** Human-readable name of a value's type, for error messages. */
 export function kindName(k: Value["kind"]): string {
@@ -61,6 +67,54 @@ export type Env = Map<string, Value>;
 
 export class ExprError extends Error {}
 
+// --- Numeric <-> symbolic boundary helpers. App code builds env entries
+// --- from numeric rows and converts results back for graphing; a null
+// --- conversion means "contains x/y/z" and therefore doesn't graph. --------
+
+export const constScalar = (n: number): Value => ({
+  kind: "scalar",
+  value: P.constant(n),
+});
+export const constVec2 = (v: Vec2): Value => ({
+  kind: "vector",
+  value: { x: P.constant(v.x), y: P.constant(v.y) },
+});
+export const constVec3 = (v: Vec3): Value => ({
+  kind: "vector3",
+  value: { x: P.constant(v.x), y: P.constant(v.y), z: P.constant(v.z) },
+});
+export const constMat2 = (m: Mat2): Value => ({
+  kind: "matrix",
+  value: m.map(P.constant) as unknown as PMat2,
+});
+export const constMat3 = (m: Mat3): Value => ({
+  kind: "matrix3",
+  value: m.map(P.constant) as unknown as PMat3,
+});
+
+export function numScalar(p: Poly): number | null {
+  return P.isConst(p) ? P.constValue(p) : null;
+}
+export function numVec2(v: PVec2): Vec2 | null {
+  const x = numScalar(v.x);
+  const y = numScalar(v.y);
+  return x !== null && y !== null ? { x, y } : null;
+}
+export function numVec3(v: PVec3): Vec3 | null {
+  const x = numScalar(v.x);
+  const y = numScalar(v.y);
+  const z = numScalar(v.z);
+  return x !== null && y !== null && z !== null ? { x, y, z } : null;
+}
+export function numMat2(m: PMat2): Mat2 | null {
+  const out = m.map(numScalar);
+  return out.every((n) => n !== null) ? (out as unknown as Mat2) : null;
+}
+export function numMat3(m: PMat3): Mat3 | null {
+  const out = m.map(numScalar);
+  return out.every((n) => n !== null) ? (out as unknown as Mat3) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Tokenizer
 // ---------------------------------------------------------------------------
@@ -68,7 +122,7 @@ export class ExprError extends Error {}
 type Tok =
   | { t: "num"; v: number }
   | { t: "id"; v: string }
-  | { t: "op"; v: "+" | "-" | "*" }
+  | { t: "op"; v: "+" | "-" | "*" | "^" }
   | { t: "lp" }
   | { t: "rp" }
   | { t: "comma" };
@@ -92,7 +146,7 @@ function tokenize(src: string): Tok[] {
     } else if (c === ",") {
       toks.push({ t: "comma" });
       i++;
-    } else if (c === "+" || c === "-") {
+    } else if (c === "+" || c === "-" || c === "^") {
       toks.push({ t: "op", v: c });
       i++;
     } else if (c === "*" || c === "·" || c === "×" || c === "•") {
@@ -127,6 +181,7 @@ const FN_ARITY = {
   transpose: 1,
   norm: 1,
   dot: 2,
+  cross: 2,
   proj: 2,
 } as const;
 export type FnName = keyof typeof FN_ARITY;
@@ -140,6 +195,7 @@ export type Node =
   | { t: "add"; a: Node; b: Node }
   | { t: "sub"; a: Node; b: Node }
   | { t: "mul"; a: Node; b: Node }
+  | { t: "pow"; a: Node; b: Node }
   | { t: "call"; fn: FnName; args: Node[] };
 
 class Parser {
@@ -189,7 +245,7 @@ class Parser {
     return node;
   }
 
-  // factor := '-' factor | atom
+  // factor := '-' factor | power
   private parseFactor(): Node {
     const p = this.peek();
     if (p?.t === "op" && p.v === "-") {
@@ -200,7 +256,19 @@ class Parser {
       this.next();
       return this.parseFactor();
     }
-    return this.parseAtom();
+    return this.parsePower();
+  }
+
+  // power := atom ('^' factor)?  — binds tighter than juxtaposition,
+  // so "2x^3" is 2·(x³); right recursion makes "x^2^3" x^(2³).
+  private parsePower(): Node {
+    const base = this.parseAtom();
+    const p = this.peek();
+    if (p?.t === "op" && p.v === "^") {
+      this.next();
+      return { t: "pow", a: base, b: this.parseFactor() };
+    }
+    return base;
   }
 
   private parseAtom(): Node {
@@ -258,34 +326,34 @@ export function parse(src: string): Node {
 // Evaluator
 // ---------------------------------------------------------------------------
 
-const scalar = (n: number): Value => ({ kind: "scalar", value: n });
-const vector = (v: Vec2): Value => ({ kind: "vector", value: v });
-const matrix = (m: Mat2): Value => ({ kind: "matrix", value: m });
-const vector3 = (v: Vec3): Value => ({ kind: "vector3", value: v });
-const matrix3 = (m: Mat3): Value => ({ kind: "matrix3", value: m });
+const scalar = (p: Poly): Value => ({ kind: "scalar", value: p });
+const vector = (v: PVec2): Value => ({ kind: "vector", value: v });
+const matrix = (m: PMat2): Value => ({ kind: "matrix", value: m });
+const vector3 = (v: PVec3): Value => ({ kind: "vector3", value: v });
+const matrix3 = (m: PMat3): Value => ({ kind: "matrix3", value: m });
 
 function add(a: Value, b: Value, sign: 1 | -1): Value {
   const s = sign;
   if (a.kind === "scalar" && b.kind === "scalar")
-    return scalar(a.value + s * b.value);
+    return scalar(P.add(a.value, b.value, s));
   if (a.kind === "vector" && b.kind === "vector")
-    return vector({ x: a.value.x + s * b.value.x, y: a.value.y + s * b.value.y });
+    return vector({
+      x: P.add(a.value.x, b.value.x, s),
+      y: P.add(a.value.y, b.value.y, s),
+    });
   if (a.kind === "vector3" && b.kind === "vector3")
     return vector3({
-      x: a.value.x + s * b.value.x,
-      y: a.value.y + s * b.value.y,
-      z: a.value.z + s * b.value.z,
+      x: P.add(a.value.x, b.value.x, s),
+      y: P.add(a.value.y, b.value.y, s),
+      z: P.add(a.value.z, b.value.z, s),
     });
-  if (a.kind === "matrix" && b.kind === "matrix")
-    return matrix([
-      a.value[0] + s * b.value[0],
-      a.value[1] + s * b.value[1],
-      a.value[2] + s * b.value[2],
-      a.value[3] + s * b.value[3],
-    ]);
+  if (a.kind === "matrix" && b.kind === "matrix") {
+    const bv = b.value;
+    return matrix(a.value.map((p, i) => P.add(p, bv[i], s)) as unknown as PMat2);
+  }
   if (a.kind === "matrix3" && b.kind === "matrix3") {
     const bv = b.value;
-    return matrix3(a.value.map((x, i) => x + s * bv[i]) as unknown as Mat3);
+    return matrix3(a.value.map((p, i) => P.add(p, bv[i], s)) as unknown as PMat3);
   }
   const word = s === 1 ? "add" : "subtract";
   throw new ExprError(
@@ -295,33 +363,64 @@ function add(a: Value, b: Value, sign: 1 | -1): Value {
 
 function mul(a: Value, b: Value): Value {
   if (a.kind === "scalar" && b.kind === "scalar")
-    return scalar(a.value * b.value);
+    return scalar(P.mul(a.value, b.value));
   if (a.kind === "scalar" && b.kind === "vector")
-    return vector({ x: a.value * b.value.x, y: a.value * b.value.y });
-  if (a.kind === "vector" && b.kind === "scalar")
-    return vector({ x: a.value.x * b.value, y: a.value.y * b.value });
+    return vector({ x: P.mul(a.value, b.value.x), y: P.mul(a.value, b.value.y) });
+  if (a.kind === "vector" && b.kind === "scalar") return mul(b, a);
   if (a.kind === "scalar" && b.kind === "vector3")
     return vector3({
-      x: a.value * b.value.x,
-      y: a.value * b.value.y,
-      z: a.value * b.value.z,
+      x: P.mul(a.value, b.value.x),
+      y: P.mul(a.value, b.value.y),
+      z: P.mul(a.value, b.value.z),
     });
   if (a.kind === "vector3" && b.kind === "scalar") return mul(b, a);
-  if (a.kind === "scalar" && b.kind === "matrix")
-    return matrix(b.value.map((x) => a.value * x) as unknown as Mat2);
-  if (a.kind === "matrix" && b.kind === "scalar")
-    return matrix(a.value.map((x) => x * b.value) as unknown as Mat2);
-  if (a.kind === "scalar" && b.kind === "matrix3")
-    return matrix3(b.value.map((x) => a.value * x) as unknown as Mat3);
+  if (a.kind === "scalar" && b.kind === "matrix") {
+    const s = a.value;
+    return matrix(b.value.map((p) => P.mul(s, p)) as unknown as PMat2);
+  }
+  if (a.kind === "matrix" && b.kind === "scalar") return mul(b, a);
+  if (a.kind === "scalar" && b.kind === "matrix3") {
+    const s = a.value;
+    return matrix3(b.value.map((p) => P.mul(s, p)) as unknown as PMat3);
+  }
   if (a.kind === "matrix3" && b.kind === "scalar") return mul(b, a);
-  if (a.kind === "matrix" && b.kind === "vector")
-    return vector(apply(a.value, b.value));
-  if (a.kind === "matrix3" && b.kind === "vector3")
-    return vector3(apply3(a.value, b.value));
-  if (a.kind === "matrix" && b.kind === "matrix")
-    return matrix(multiply(a.value, b.value));
-  if (a.kind === "matrix3" && b.kind === "matrix3")
-    return matrix3(multiply3(a.value, b.value));
+  if (a.kind === "matrix" && b.kind === "vector") {
+    const m = a.value;
+    const v = b.value;
+    return vector({
+      x: P.add(P.mul(m[0], v.x), P.mul(m[1], v.y)),
+      y: P.add(P.mul(m[2], v.x), P.mul(m[3], v.y)),
+    });
+  }
+  if (a.kind === "matrix3" && b.kind === "vector3") {
+    const m = a.value;
+    const v = b.value;
+    const row = (r: number) =>
+      P.add(P.add(P.mul(m[r], v.x), P.mul(m[r + 1], v.y)), P.mul(m[r + 2], v.z));
+    return vector3({ x: row(0), y: row(3), z: row(6) });
+  }
+  if (a.kind === "matrix" && b.kind === "matrix") {
+    const m = a.value;
+    const n = b.value;
+    return matrix([
+      P.add(P.mul(m[0], n[0]), P.mul(m[1], n[2])),
+      P.add(P.mul(m[0], n[1]), P.mul(m[1], n[3])),
+      P.add(P.mul(m[2], n[0]), P.mul(m[3], n[2])),
+      P.add(P.mul(m[2], n[1]), P.mul(m[3], n[3])),
+    ]);
+  }
+  if (a.kind === "matrix3" && b.kind === "matrix3") {
+    const m = a.value;
+    const n = b.value;
+    const out: Poly[] = new Array(9);
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < 3; c++)
+        out[r * 3 + c] = P.add(
+          P.add(P.mul(m[r * 3], n[c]), P.mul(m[r * 3 + 1], n[3 + c])),
+          P.mul(m[r * 3 + 2], n[6 + c]),
+        );
+    return matrix3(out as unknown as PMat3);
+  }
   if (
     (a.kind === "vector" && b.kind === "matrix") ||
     (a.kind === "vector3" && b.kind === "matrix3")
@@ -332,14 +431,38 @@ function mul(a: Value, b: Value): Value {
   );
 }
 
+const SYMBOLS: Record<string, 0 | 1 | 2> = { x: 0, y: 1, z: 2 };
+
+/** A name is either bound in the env or one of the symbols x, y, z. */
+function resolveName(name: string, env: Env): Value | null {
+  const v = env.get(name);
+  if (v) return v;
+  if (name in SYMBOLS) return scalar(P.symbol(SYMBOLS[name]));
+  return null;
+}
+
 export function evaluate(node: Node, env: Env): Value {
   switch (node.t) {
     case "num":
-      return scalar(node.v);
+      return constScalar(node.v);
     case "var": {
-      const v = env.get(node.name);
-      if (!v) throw new ExprError(`"${node.name}" is not defined`);
-      return v;
+      const v = resolveName(node.name, env);
+      if (v) return v;
+      // Desmos-style implicit product: an unknown all-letter identifier
+      // like "xy" or "ax" splits into single letters if every one resolves.
+      if (node.name.length > 1 && /^[A-Za-z]+$/.test(node.name)) {
+        let acc: Value | null = null;
+        for (const ch of node.name) {
+          const cv = resolveName(ch, env);
+          if (!cv) {
+            acc = null;
+            break;
+          }
+          acc = acc === null ? cv : mul(acc, cv);
+        }
+        if (acc) return acc;
+      }
+      throw new ExprError(`"${node.name}" is not defined`);
     }
     case "vec": {
       const x = evaluate(node.x, env);
@@ -356,85 +479,172 @@ export function evaluate(node: Node, env: Env): Value {
         throw new ExprError("Vector components must be numbers");
       return vector3({ x: x.value, y: y.value, z: z.value });
     }
-    case "neg": {
-      const a = evaluate(node.a, env);
-      return mul(scalar(-1), a);
-    }
+    case "neg":
+      return mul(constScalar(-1), evaluate(node.a, env));
     case "add":
       return add(evaluate(node.a, env), evaluate(node.b, env), 1);
     case "sub":
       return add(evaluate(node.a, env), evaluate(node.b, env), -1);
     case "mul":
       return mul(evaluate(node.a, env), evaluate(node.b, env));
+    case "pow": {
+      const base = evaluate(node.a, env);
+      const expo = evaluate(node.b, env);
+      if (base.kind !== "scalar" || expo.kind !== "scalar")
+        throw new ExprError("^ expects numbers");
+      const n = numScalar(expo.value);
+      if (n === null) throw new ExprError("Exponents can't contain x, y, z");
+      const bc = numScalar(base.value);
+      if (bc !== null) {
+        const r = Math.pow(bc, n);
+        if (!Number.isFinite(r)) throw new ExprError("Invalid power");
+        return constScalar(r);
+      }
+      if (!Number.isInteger(n) || n < 0)
+        throw new ExprError("Symbolic powers need a whole-number exponent");
+      if (n > 32) throw new ExprError("Exponent too large");
+      return scalar(P.pow(base.value, n));
+    }
     case "call": {
       const args = node.args.map((n) => evaluate(n, env));
       switch (node.fn) {
         case "det": {
           const [a] = args;
-          if (a.kind === "matrix") return scalar(matDet(a.value));
-          if (a.kind === "matrix3") return scalar(det3(a.value));
+          if (a.kind === "matrix") {
+            const m = a.value;
+            return scalar(P.add(P.mul(m[0], m[3]), P.mul(m[1], m[2]), -1));
+          }
+          if (a.kind === "matrix3") {
+            const m = a.value;
+            const minor = (p: Poly, q: Poly, r: Poly, s: Poly) =>
+              P.add(P.mul(p, s), P.mul(q, r), -1);
+            let d = P.mul(m[0], minor(m[4], m[5], m[7], m[8]));
+            d = P.add(d, P.mul(m[1], minor(m[3], m[5], m[6], m[8])), -1);
+            d = P.add(d, P.mul(m[2], minor(m[3], m[4], m[6], m[7])));
+            return scalar(d);
+          }
           throw new ExprError("det expects a matrix");
         }
         case "inv": {
           const [a] = args;
-          if (a.kind !== "matrix" && a.kind !== "matrix3")
-            throw new ExprError("inv expects a matrix");
-          const m =
-            a.kind === "matrix" ? inverse(a.value) : inverse3(a.value);
-          if (!m) throw new ExprError("Not invertible (det = 0)");
-          return a.kind === "matrix" ? matrix(m as Mat2) : matrix3(m as Mat3);
+          if (a.kind === "matrix") {
+            const m = numMat2(a.value);
+            if (!m) throw new ExprError("inv needs numeric entries");
+            const r = inverse(m);
+            if (!r) throw new ExprError("Not invertible (det = 0)");
+            return constMat2(r);
+          }
+          if (a.kind === "matrix3") {
+            const m = numMat3(a.value);
+            if (!m) throw new ExprError("inv needs numeric entries");
+            const r = inverse3(m);
+            if (!r) throw new ExprError("Not invertible (det = 0)");
+            return constMat3(r);
+          }
+          throw new ExprError("inv expects a matrix");
         }
         case "transpose": {
           const [a] = args;
-          if (a.kind === "matrix") return matrix(matTranspose(a.value));
-          if (a.kind === "matrix3") return matrix3(transpose3(a.value));
+          if (a.kind === "matrix") {
+            const m = a.value;
+            return matrix([m[0], m[2], m[1], m[3]]);
+          }
+          if (a.kind === "matrix3") {
+            const m = a.value;
+            return matrix3([
+              m[0], m[3], m[6],
+              m[1], m[4], m[7],
+              m[2], m[5], m[8],
+            ]);
+          }
           throw new ExprError("transpose expects a matrix");
         }
         case "norm": {
           const [a] = args;
-          if (a.kind === "vector") return scalar(Math.hypot(a.value.x, a.value.y));
-          if (a.kind === "vector3")
-            return scalar(Math.hypot(a.value.x, a.value.y, a.value.z));
+          if (a.kind === "vector") {
+            const v = numVec2(a.value);
+            if (!v) throw new ExprError("norm needs numeric components");
+            return constScalar(Math.hypot(v.x, v.y));
+          }
+          if (a.kind === "vector3") {
+            const v = numVec3(a.value);
+            if (!v) throw new ExprError("norm needs numeric components");
+            return constScalar(Math.hypot(v.x, v.y, v.z));
+          }
           throw new ExprError("norm expects a vector");
         }
         case "dot": {
           const [a, b] = args;
           if (a.kind === "vector" && b.kind === "vector")
-            return scalar(a.value.x * b.value.x + a.value.y * b.value.y);
+            return scalar(
+              P.add(P.mul(a.value.x, b.value.x), P.mul(a.value.y, b.value.y)),
+            );
           if (a.kind === "vector3" && b.kind === "vector3")
             return scalar(
-              a.value.x * b.value.x +
-                a.value.y * b.value.y +
-                a.value.z * b.value.z,
+              P.add(
+                P.add(
+                  P.mul(a.value.x, b.value.x),
+                  P.mul(a.value.y, b.value.y),
+                ),
+                P.mul(a.value.z, b.value.z),
+              ),
             );
           throw new ExprError("dot expects two vectors of the same dimension");
         }
+        case "cross": {
+          const [a, b] = args;
+          if (a.kind === "vector" && b.kind === "vector")
+            // 2D cross: the scalar v.x·w.y − v.y·w.x (the signed area of the
+            // parallelogram; equivalently det([v w])).
+            return scalar(
+              P.add(P.mul(a.value.x, b.value.y), P.mul(a.value.y, b.value.x), -1),
+            );
+          if (a.kind === "vector3" && b.kind === "vector3") {
+            const u = a.value;
+            const v = b.value;
+            return vector3({
+              x: P.add(P.mul(u.y, v.z), P.mul(u.z, v.y), -1),
+              y: P.add(P.mul(u.z, v.x), P.mul(u.x, v.z), -1),
+              z: P.add(P.mul(u.x, v.y), P.mul(u.y, v.x), -1),
+            });
+          }
+          throw new ExprError("cross expects two vectors of the same dimension");
+        }
         case "proj": {
-          // proj(v, w): the projection of v onto w.
+          // proj(v, w): the projection of v onto w. The direction w must be
+          // numeric (division); v may be symbolic.
           const [a, b] = args;
           if (a.kind === "vector" && b.kind === "vector") {
-            const ww = b.value.x * b.value.x + b.value.y * b.value.y;
+            const w = numVec2(b.value);
+            if (!w)
+              throw new ExprError("proj needs numeric components in w");
+            const ww = w.x * w.x + w.y * w.y;
             if (ww < 1e-24)
               throw new ExprError("Can't project onto the zero vector");
-            const k = (a.value.x * b.value.x + a.value.y * b.value.y) / ww;
-            return vector({ x: k * b.value.x, y: k * b.value.y });
+            const k = P.scale(
+              P.add(P.scale(a.value.x, w.x), P.scale(a.value.y, w.y)),
+              1 / ww,
+            );
+            return vector({ x: P.scale(k, w.x), y: P.scale(k, w.y) });
           }
           if (a.kind === "vector3" && b.kind === "vector3") {
-            const ww =
-              b.value.x * b.value.x +
-              b.value.y * b.value.y +
-              b.value.z * b.value.z;
+            const w = numVec3(b.value);
+            if (!w)
+              throw new ExprError("proj needs numeric components in w");
+            const ww = w.x * w.x + w.y * w.y + w.z * w.z;
             if (ww < 1e-24)
               throw new ExprError("Can't project onto the zero vector");
-            const k =
-              (a.value.x * b.value.x +
-                a.value.y * b.value.y +
-                a.value.z * b.value.z) /
-              ww;
+            const k = P.scale(
+              P.add(
+                P.add(P.scale(a.value.x, w.x), P.scale(a.value.y, w.y)),
+                P.scale(a.value.z, w.z),
+              ),
+              1 / ww,
+            );
             return vector3({
-              x: k * b.value.x,
-              y: k * b.value.y,
-              z: k * b.value.z,
+              x: P.scale(k, w.x),
+              y: P.scale(k, w.y),
+              z: P.scale(k, w.z),
             });
           }
           throw new ExprError("proj expects two vectors of the same dimension");
@@ -449,7 +659,12 @@ export function evaluate(node: Node, env: Env): Value {
 }
 
 /** Names with built-in meaning that rows can't bind. */
-export const RESERVED_NAMES = new Set(Object.keys(FN_ARITY));
+export const RESERVED_NAMES = new Set([
+  ...Object.keys(FN_ARITY),
+  "x",
+  "y",
+  "z",
+]);
 
 /**
  * If the row's source is a name binding like "u = M·v", split it into the

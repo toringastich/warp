@@ -18,7 +18,14 @@ export interface Vector3Drawable {
   ride: boolean; // apply the warp (defined vectors) vs. fixed (computed results)
   label?: string;
 }
-export type Drawable3 = Vector3Drawable;
+export interface ParallelogramDrawable {
+  kind: "para";
+  /** The two spanning vectors — drawn translucent (area = |a×b|). */
+  a: Vec3;
+  b: Vec3;
+  color: string;
+}
+export type Drawable3 = Vector3Drawable | ParallelogramDrawable;
 
 // Light Desmos-style stage (continuous with the 2D graph); the basis
 // vectors keep the 3b1b palette: î green, ĵ red, k̂ blue.
@@ -289,6 +296,42 @@ export default function TransformCanvas3D({
       }
 
       for (const d of drawablesRef.current) {
+        if (d.kind === "para") {
+          // Translucent parallelogram spanned by a and b (area = |a×b|).
+          const o = new THREE.Vector3(0, 0, 0);
+          const pa = toV(d.a);
+          const pb = toV(d.b);
+          const pab = pa.clone().add(pb);
+          const geom = new THREE.BufferGeometry().setFromPoints([
+            o, pa, pab,
+            o, pab, pb,
+          ]);
+          dynamic.add(
+            new THREE.Mesh(
+              geom,
+              new THREE.MeshBasicMaterial({
+                color: d.color,
+                transparent: true,
+                opacity: 0.15,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+              }),
+            ),
+          );
+          dynamic.add(
+            new THREE.LineSegments(
+              new THREE.BufferGeometry().setFromPoints([
+                o, pa, pa, pab, pab, pb, pb, o,
+              ]),
+              new THREE.LineBasicMaterial({
+                color: d.color,
+                transparent: true,
+                opacity: 0.5,
+              }),
+            ),
+          );
+          continue;
+        }
         const tip = d.ride ? apply3(M, d.vec) : d.vec;
         if (Math.hypot(tip.x, tip.y, tip.z) < 1e-9) continue;
         dynamic.add(makeArrow(tip, d.color));

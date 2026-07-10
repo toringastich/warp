@@ -14,14 +14,17 @@ import { apply3, IDENTITY3, lerp3, type Mat3 } from "./lib/matrix3";
 import {
   evaluate,
   ExprError,
+  numMat3,
+  numScalar,
+  numVec3,
   parse,
   parseBinding,
   RESERVED_NAMES,
   type Env,
 } from "./lib/expr";
 import {
-  cellsToMatrix3,
-  cellsToVector3,
+  cellsToPMat3,
+  cellsToPVec3,
   GRAPH_COLORS,
   nextName,
   type Row,
@@ -65,11 +68,13 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
       if (!nm || RESERVED_NAMES.has(nm)) continue;
       if (!nameOwner.has(nm)) nameOwner.set(nm, row.id);
     }
+    // Cells parse as tiny expressions, so a vector cell holding "2x" feeds
+    // the environment symbolically.
     for (const row of rows) {
       if (row.kind === "matrix" && nameOwner.get(row.name) === row.id)
-        env.set(row.name, { kind: "matrix3", value: cellsToMatrix3(row.cells) });
+        env.set(row.name, { kind: "matrix3", value: cellsToPMat3(row.cells) });
       else if (row.kind === "vector" && nameOwner.get(row.name) === row.id)
-        env.set(row.name, { kind: "vector3", value: cellsToVector3(row.cells) });
+        env.set(row.name, { kind: "vector3", value: cellsToPVec3(row.cells) });
     }
     const pending: { name: string; ast: ReturnType<typeof parse> }[] = [];
     for (const row of rows) {
@@ -108,8 +113,14 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
     for (const row of rows) {
       if (row.kind === "matrix") {
         const clash = nameClash(row);
-        if (clash) results.set(row.id, { error: clash });
-        else targetOf.set(row.id, cellsToMatrix3(row.cells));
+        if (clash) {
+          results.set(row.id, { error: clash });
+          continue;
+        }
+        // Symbolic entries still compute through the env, but only a fully
+        // numeric matrix can warp space.
+        const m = numMat3(cellsToPMat3(row.cells));
+        if (m) targetOf.set(row.id, m);
         continue;
       }
       if (row.kind === "vector") {
@@ -118,12 +129,15 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
           results.set(row.id, { error: clash });
           continue;
         }
+        // A vector containing x/y/z computes symbolically but doesn't graph.
+        const nv = numVec3(cellsToPVec3(row.cells));
+        if (!nv) continue;
         const color = nextColor();
         colorOf.set(row.id, color);
         if (row.shown) {
           const d: Vector3Drawable = {
             kind: "vector",
-            vec: cellsToVector3(row.cells),
+            vec: nv,
             color,
             ride: true,
             label: row.name,
@@ -151,26 +165,48 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
         const value = evaluate(ast, env);
         const isNumericLiteral =
           ast.t === "num" || (ast.t === "neg" && ast.a.t === "num");
-        if (binding && isNumericLiteral && value.kind === "scalar") {
-          sliders.set(row.id, value.value);
+        const litVal =
+          binding && isNumericLiteral && value.kind === "scalar"
+            ? numScalar(value.value)
+            : null;
+        if (litVal !== null) {
+          sliders.set(row.id, litVal);
         } else {
           results.set(row.id, { text: valueToText(value) });
         }
 
+        // Values containing x/y/z show inline only — they don't graph, and a
+        // symbolic matrix can't drive the warp.
         if (value.kind === "matrix3") {
-          targetOf.set(row.id, value.value);
-          warpables.add(row.id);
+          const target = numMat3(value.value);
+          if (target) {
+            targetOf.set(row.id, target);
+            warpables.add(row.id);
+          }
         } else if (value.kind === "vector3") {
+          const nv = numVec3(value.value);
+          if (!nv) continue;
           const color = nextColor();
           colorOf.set(row.id, color);
-          if (row.shown)
+          if (row.shown) {
+            // A top-level cross(v, w) also draws the parallelogram spanned by
+            // v and w — its area is |cross|, and the arrow is perpendicular.
+            if (ast.t === "call" && ast.fn === "cross") {
+              const a = evaluate(ast.args[0], env);
+              const b = evaluate(ast.args[1], env);
+              const an = a.kind === "vector3" ? numVec3(a.value) : null;
+              const bn = b.kind === "vector3" ? numVec3(b.value) : null;
+              if (an && bn)
+                drawables.push({ kind: "para", a: an, b: bn, color });
+            }
             drawables.push({
               kind: "vector",
-              vec: value.value,
+              vec: nv,
               color,
               ride: false,
               label: binding?.name,
             });
+          }
         }
       } catch (e) {
         results.set(row.id, {
@@ -200,8 +236,8 @@ export default function Warp3D({ mode, onModeChange }: SandboxProps) {
       for (const row of rows) {
         if (row.kind !== "vector" || !row.shown || row.id === activeId) continue;
         const d = ridingVectors.get(row.id);
-        if (!d) continue; // no drawable (e.g. name clash) — keep its error
-        const image = apply3(target, cellsToVector3(row.cells));
+        if (!d) continue; // no drawable (name clash, symbolic) — keep as-is
+        const image = apply3(target, d.vec);
         const lbl = `${warpName}·${row.name}`;
         d.label = lbl;
         results.set(row.id, {

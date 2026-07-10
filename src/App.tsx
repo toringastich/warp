@@ -18,6 +18,9 @@ import {
   evaluate,
   ExprError,
   multiplicativeFactors,
+  numMat2,
+  numScalar,
+  numVec2,
   parse,
   parseBinding,
   RESERVED_NAMES,
@@ -26,8 +29,8 @@ import {
   type Value,
 } from "./lib/expr";
 import {
-  cellsToMatrix,
-  cellsToVector,
+  cellsToPMat2,
+  cellsToPVec2,
   EIGEN_COLORS,
   GRAPH_COLORS,
   nextName,
@@ -135,11 +138,13 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
     }
 
     // Literal rows don't depend on anything — bind them first.
+    // Cells parse as tiny expressions, so a vector cell holding "2x" feeds
+    // the environment symbolically.
     for (const row of rows) {
       if (row.kind === "matrix" && nameOwner.get(row.name) === row.id)
-        env.set(row.name, { kind: "matrix", value: cellsToMatrix(row.cells) });
+        env.set(row.name, { kind: "matrix", value: cellsToPMat2(row.cells) });
       else if (row.kind === "vector" && nameOwner.get(row.name) === row.id)
-        env.set(row.name, { kind: "vector", value: cellsToVector(row.cells) });
+        env.set(row.name, { kind: "vector", value: cellsToPVec2(row.cells) });
     }
 
     // Named expressions may reference each other in any order, so keep
@@ -186,7 +191,9 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
           return null;
         }
         if (v.kind !== "matrix") return null;
-        ms.push(v.value);
+        const m = numMat2(v.value);
+        if (!m) return null; // symbolic factor — nothing to animate
+        ms.push(m);
       }
       const mats: Mat2[] = [];
       const names: string[] = [];
@@ -218,7 +225,10 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
           results.set(row.id, { error: clash });
           continue;
         }
-        stagesOf.set(row.id, [cellsToMatrix(row.cells)]);
+        // Symbolic entries still compute through the env, but only a fully
+        // numeric matrix can warp the grid.
+        const m = numMat2(cellsToPMat2(row.cells));
+        if (m) stagesOf.set(row.id, [m]);
         continue;
       }
       if (row.kind === "vector") {
@@ -227,12 +237,15 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
           results.set(row.id, { error: clash });
           continue;
         }
+        // A vector containing x/y/z computes symbolically but doesn't graph.
+        const nv = numVec2(cellsToPVec2(row.cells));
+        if (!nv) continue;
         const color = nextColor();
         colorOf.set(row.id, color);
         if (row.shown) {
           const d: VectorDrawable = {
             kind: "vector",
-            vec: cellsToVector(row.cells),
+            vec: nv,
             color,
             ride: true,
             label: row.name,
@@ -258,8 +271,10 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
           if (binding)
             throw new ExprError("eigen(…) can't be assigned to a name");
           const mv = evaluate(ast.args[0], env);
-          if (mv.kind !== "matrix") throw new ExprError("eigen expects a matrix");
-          const eg = eigen(mv.value);
+          const mnum = mv.kind === "matrix" ? numMat2(mv.value) : null;
+          if (!mnum)
+            throw new ExprError("eigen expects a matrix with numeric entries");
+          const eg = eigen(mnum);
           eigenRows.add(row.id);
           if (eg.kind === "complex") {
             results.set(row.id, {
@@ -311,18 +326,29 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
         // a redundant "= 1.5" result line.
         const isNumericLiteral =
           ast.t === "num" || (ast.t === "neg" && ast.a.t === "num");
-        if (binding && isNumericLiteral && value.kind === "scalar") {
-          sliders.set(row.id, value.value);
+        const litVal =
+          binding && isNumericLiteral && value.kind === "scalar"
+            ? numScalar(value.value)
+            : null;
+        if (litVal !== null) {
+          sliders.set(row.id, litVal);
         } else {
           results.set(row.id, { text: valueToText(value) });
         }
 
+        // Values containing x/y/z show inline only — they don't graph, and a
+        // symbolic matrix can't drive the warp.
         if (value.kind === "matrix") {
-          const st = buildStages(ast);
-          stagesOf.set(row.id, st ? st.mats : [value.value]);
-          if (st) stageNamesOf.set(row.id, st.names);
-          warpables.add(row.id);
+          const target = numMat2(value.value);
+          if (target) {
+            const st = buildStages(ast);
+            stagesOf.set(row.id, st ? st.mats : [target]);
+            if (st) stageNamesOf.set(row.id, st.names);
+            warpables.add(row.id);
+          }
         } else if (value.kind === "vector") {
+          const nv = numVec2(value.value);
+          if (!nv) continue;
           const color = nextColor();
           colorOf.set(row.id, color);
           // A top-level proj(v, w) draws the line it projects onto, a ghost of
@@ -330,15 +356,17 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
           if (ast.t === "call" && ast.fn === "proj") {
             const from = evaluate(ast.args[0], env);
             const onto = evaluate(ast.args[1], env);
-            if (from.kind === "vector" && onto.kind === "vector") {
+            const f = from.kind === "vector" ? numVec2(from.value) : null;
+            const o = onto.kind === "vector" ? numVec2(onto.value) : null;
+            if (f && o) {
               projRows.add(row.id);
               if (row.shown) {
-                const len = Math.hypot(onto.value.x, onto.value.y);
+                const len = Math.hypot(o.x, o.y);
                 drawables.push({
                   kind: "proj",
-                  from: from.value,
-                  to: value.value,
-                  dir: { x: onto.value.x / len, y: onto.value.y / len },
+                  from: f,
+                  to: nv,
+                  dir: { x: o.x / len, y: o.y / len },
                   color,
                   label: binding?.name,
                   animate: activeId === row.id,
@@ -354,14 +382,12 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
             parts = [];
             for (const term of terms) {
               const tv = evaluate(term.node, env);
-              if (tv.kind !== "vector") {
+              const tn = tv.kind === "vector" ? numVec2(tv.value) : null;
+              if (!tn) {
                 parts = null;
                 break;
               }
-              parts.push({
-                x: term.sign * tv.value.x,
-                y: term.sign * tv.value.y,
-              });
+              parts.push({ x: term.sign * tn.x, y: term.sign * tn.y });
             }
           }
           if (row.shown) {
@@ -369,7 +395,7 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
               drawables.push({
                 kind: "sum",
                 parts,
-                result: value.value,
+                result: nv,
                 color,
                 ride: false,
                 label: binding?.name,
@@ -377,7 +403,7 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
             } else {
               drawables.push({
                 kind: "vector",
-                vec: value.value,
+                vec: nv,
                 color,
                 ride: false,
                 label: binding?.name,
@@ -411,8 +437,8 @@ function Warp2D({ mode, onModeChange }: SandboxProps) {
       for (const row of rows) {
         if (row.kind !== "vector" || !row.shown || row.id === activeId) continue;
         const d = ridingVectors.get(row.id);
-        if (!d) continue; // no drawable (e.g. name clash) — keep its error
-        const image = apply(target, cellsToVector(row.cells));
+        if (!d) continue; // no drawable (name clash, symbolic) — keep as-is
+        const image = apply(target, d.vec);
         const lbl = `${warpName}·${row.name}`;
         d.label = lbl;
         results.set(row.id, {
