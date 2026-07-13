@@ -13,6 +13,8 @@ import TransformCanvas, {
   type VectorDrawable,
 } from "./components/TransformCanvas";
 import ExpressionList from "./components/ExpressionList";
+import SidebarResizer from "./components/SidebarResizer";
+import { FEEDBACK_URL } from "./config";
 import {
   apply,
   eigen,
@@ -852,6 +854,7 @@ function Warp2D({
         onPlay={playWarp}
         onScrub={scrubWarp}
       />
+      <SidebarResizer />
       <main className="stage">
         <TransformCanvas
           warp={warp}
@@ -859,6 +862,14 @@ function Warp2D({
           drawables={scene.drawables}
           projT={t}
         />
+        <a
+          className="feedback-btn"
+          href={FEEDBACK_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Feedback
+        </a>
       </main>
     </div>
   );

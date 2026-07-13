@@ -48,6 +48,7 @@ body,
 .brand {
   display: flex;
   align-items: center;
+  flex-wrap: wrap; /* narrow sidebar: actions drop to a second row */
   gap: 9px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
@@ -55,6 +56,14 @@ body,
   top: 0;
   background: var(--bg);
   z-index: 5;
+}
+
+/* Undo / redo / share / add travel as one unit so they wrap together. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 .brand-mark {
   color: var(--blue);
@@ -479,11 +488,64 @@ body,
   border-top: 1px solid var(--line);
 }
 
+/* ---------- Sidebar resizer ---------- */
+.sidebar-resizer {
+  flex: 0 0 10px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+  z-index: 15;
+}
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.dragging::after {
+  background: var(--blue);
+}
+@media (pointer: coarse) {
+  .sidebar-resizer {
+    flex-basis: 22px;
+    margin-left: -11px;
+  }
+  .sidebar-resizer::after {
+    left: 10px;
+  }
+}
+
 /* ---------- Stage / canvas ---------- */
 .stage {
   flex: 1 1 auto;
   position: relative;
   min-width: 0;
+}
+
+.feedback-btn {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 10;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+}
+.feedback-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
 }
 .warp-canvas {
   display: block;

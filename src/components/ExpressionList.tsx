@@ -155,38 +155,40 @@ export default function ExpressionList(props: Props) {
             </button>
           ))}
         </div>
-        <button
-          className="gear gear-sm"
-          title="Undo (⌘Z)"
-          disabled={!props.canUndo}
-          onClick={props.onUndo}
-        >
-          ↺
-        </button>
-        <button
-          className="gear gear-sm"
-          title="Redo (⇧⌘Z)"
-          disabled={!props.canRedo}
-          onClick={props.onRedo}
-        >
-          ↻
-        </button>
-        <button
-          className="gear gear-sm"
-          title="Copy a shareable link to this graph"
-          onClick={handleShare}
-        >
-          {copied ? "✓" : "⧉"}
-        </button>
-        <div className="gear-wrap">
+        <div className="header-actions">
           <button
-            className="gear"
-            title="Add…"
-            onClick={() => setOpenGear(openGear === "header" ? null : "header")}
+            className="gear gear-sm"
+            title="Undo (⌘Z)"
+            disabled={!props.canUndo}
+            onClick={props.onUndo}
           >
-            +
+            ↺
           </button>
-          {openGear === "header" && palette(undefined)}
+          <button
+            className="gear gear-sm"
+            title="Redo (⇧⌘Z)"
+            disabled={!props.canRedo}
+            onClick={props.onRedo}
+          >
+            ↻
+          </button>
+          <button
+            className="gear gear-sm"
+            title="Copy a shareable link to this graph"
+            onClick={handleShare}
+          >
+            {copied ? "✓" : "⧉"}
+          </button>
+          <div className="gear-wrap">
+            <button
+              className="gear"
+              title="Add…"
+              onClick={() => setOpenGear(openGear === "header" ? null : "header")}
+            >
+              +
+            </button>
+            {openGear === "header" && palette(undefined)}
+          </div>
         </div>
       </header>
 
@@ -243,7 +245,6 @@ export default function ExpressionList(props: Props) {
                               key={idx}
                               className="matrix-cell"
                               type="text"
-                              inputMode="decimal"
                               value={c}
                               onChange={(e) =>
                                 props.onMatrixCell(row.id, idx, e.target.value)
@@ -271,7 +272,6 @@ export default function ExpressionList(props: Props) {
                               key={idx}
                               className="matrix-cell"
                               type="text"
-                              inputMode="decimal"
                               value={c}
                               onChange={(e) =>
                                 props.onVectorCell(row.id, idx, e.target.value)
@@ -344,7 +344,6 @@ export default function ExpressionList(props: Props) {
                         <input
                           className="slider-bound"
                           type="text"
-                          inputMode="decimal"
                           title="Slider minimum"
                           value={minStr}
                           onChange={(e) =>
@@ -369,7 +368,6 @@ export default function ExpressionList(props: Props) {
                         <input
                           className="slider-bound"
                           type="text"
-                          inputMode="decimal"
                           title="Slider maximum"
                           value={maxStr}
                           onChange={(e) =>

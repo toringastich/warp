@@ -10,6 +10,8 @@ import TransformCanvas3D, {
   type Vector3Drawable,
 } from "./components/TransformCanvas3D";
 import ExpressionList from "./components/ExpressionList";
+import SidebarResizer from "./components/SidebarResizer";
+import { FEEDBACK_URL } from "./config";
 import { apply3, IDENTITY3, lerp3, type Mat3 } from "./lib/matrix3";
 import {
   evaluate,
@@ -431,12 +433,21 @@ export default function Warp3D({
         onPlay={playWarp}
         onScrub={scrubWarp}
       />
+      <SidebarResizer />
       <main className="stage">
         <TransformCanvas3D
           warp={warp}
           showActiveMatrix={activeTarget !== null}
           drawables={scene.drawables}
         />
+        <a
+          className="feedback-btn"
+          href={FEEDBACK_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Feedback
+        </a>
       </main>
     </div>
   );
