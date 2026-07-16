@@ -55,6 +55,7 @@ export default function Warp3D({
   canUndo,
   canRedo,
   onShare,
+  onTour,
 }: SandboxProps) {
   const [t, setT] = useState(1);
   const [playing, setPlaying] = useState(false);
@@ -448,6 +449,9 @@ export default function Warp3D({
         >
           Feedback
         </a>
+        <button className="feedback-btn tutorial-btn" onClick={onTour}>
+          Tutorial
+        </button>
       </main>
     </div>
   );

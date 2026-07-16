@@ -144,7 +144,7 @@ export default function ExpressionList(props: Props) {
       <header className="brand">
         <span className="brand-mark">▦</span>
         <h1>Warp</h1>
-        <div className="mode-toggle">
+        <div className="mode-toggle" data-tour="mode">
           {(["2d", "3d"] as Mode[]).map((m) => (
             <button
               key={m}
@@ -174,12 +174,13 @@ export default function ExpressionList(props: Props) {
           </button>
           <button
             className="gear gear-sm"
+            data-tour="share"
             title="Copy a shareable link to this graph"
             onClick={handleShare}
           >
             {copied ? "✓" : "⧉"}
           </button>
-          <div className="gear-wrap">
+          <div className="gear-wrap" data-tour="add">
             <button
               className="gear"
               title="Add…"
@@ -205,12 +206,13 @@ export default function ExpressionList(props: Props) {
           const graphable = isWarp || isEigen || color !== undefined;
           const shown = isWarp ? activeId === row.id : row.shown;
           return (
-            <div className="row" key={row.id}>
+            <div className="row" key={row.id} data-tour-kind={row.kind}>
               <div className="row-index">{i + 1}</div>
               <div className="row-body">
                 <div className="row-top">
                   {graphable ? (
                     <button
+                      data-tour="toggle"
                       className={
                         "toggle-dot" +
                         (isWarp ? " matrix" : "") +
@@ -382,7 +384,7 @@ export default function ExpressionList(props: Props) {
                     projection (which animates the perpendicular drop) */}
                 {((isWarp && activeId === row.id) ||
                   (projRows.has(row.id) && shown)) && (
-                  <div className="anim">
+                  <div className="anim" data-tour="anim">
                     <button
                       className="play"
                       onClick={() => props.onPlay(row.id)}

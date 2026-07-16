@@ -14,6 +14,7 @@ import TransformCanvas, {
 } from "./components/TransformCanvas";
 import ExpressionList from "./components/ExpressionList";
 import SidebarResizer from "./components/SidebarResizer";
+import Tour from "./components/Tour";
 import { FEEDBACK_URL } from "./config";
 import {
   apply,
@@ -89,6 +90,13 @@ function niceDir(v: Vec2): Vec2 {
 const INITIAL = loadInitialState();
 const MAX_UNDO = 200;
 const COMMIT_MS = 400; // rapid edits within this window form one undo step
+
+const TOUR_SEEN_KEY = "warp:tourSeen";
+
+/** A doc the user hasn't touched: nothing but blank expression boxes. */
+function isBlankDoc(rows: Row[]): boolean {
+  return rows.every((r) => r.kind === "expr" && r.src.trim() === "");
+}
 
 /**
  * A document with an undo/redo history. Snapshots are just references to the
@@ -231,6 +239,76 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // --- Onboarding tour. Launches itself on a first visit with a blank
+  // --- sandbox; relaunchable any time from the header "?" button. The play
+  // --- controls and expression results only exist with content on screen,
+  // --- so an empty document gets seeded with a small demo scene first.
+  const [tourOpen, setTourOpen] = useState(false);
+  const openTour = () => {
+    changeMode("2d");
+    // Seed whatever the tour needs that isn't there yet — a matrix to warp
+    // and animate, a vector to ride it, an expression to compute — leaving
+    // everything the user already built untouched.
+    const rows = [...doc2.rows];
+    let changed = false;
+    let m = rows.find((r) => r.kind === "matrix");
+    if (!m) {
+      m = {
+        id: newId(),
+        kind: "matrix",
+        name: nextName(rows, "matrix"),
+        cells: ["1", "1", "0", "1"],
+      };
+      rows.push(m);
+      changed = true;
+    }
+    if (!rows.some((r) => r.kind === "vector")) {
+      rows.push({
+        id: newId(),
+        kind: "vector",
+        name: nextName(rows, "vector"),
+        cells: ["2", "1"],
+        shown: true,
+      });
+      changed = true;
+    }
+    if (!rows.some((r) => r.kind === "expr" && r.src.trim() !== "")) {
+      const det: Row = {
+        id: newId(),
+        kind: "expr",
+        src: `det(${m.name})`,
+        shown: true,
+      };
+      const blank = rows.findIndex((r) => r.kind === "expr");
+      if (blank >= 0) rows[blank] = det;
+      else rows.push(det);
+      changed = true;
+    }
+    if (changed) doc2.setRows(rows);
+    if (!doc2.activeId) doc2.setActiveId(m.id);
+    setTourOpen(true);
+  };
+  const closeTour = () => {
+    setTourOpen(false);
+    try {
+      localStorage.setItem(TOUR_SEEN_KEY, "1");
+    } catch {
+      // storage unavailable — the tour just re-offers next visit
+    }
+  };
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(TOUR_SEEN_KEY)) return;
+    } catch {
+      return; // can't remember dismissal — don't nag on every load
+    }
+    // Only self-launch over a fresh sandbox, never over a shared scene.
+    if (INITIAL.mode !== "2d" || !isBlankDoc(INITIAL.d2.rows)) return;
+    const t = setTimeout(openTour, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const share = () => {
     const enc = encode();
     window.history.replaceState(null, "", "#s=" + enc);
@@ -253,6 +331,7 @@ export default function App() {
     canUndo: doc.canUndo,
     canRedo: doc.canRedo,
     onShare: share,
+    onTour: openTour,
   });
 
   return (
@@ -267,6 +346,7 @@ export default function App() {
           </Suspense>
         </div>
       )}
+      {tourOpen && <Tour onClose={closeTour} />}
     </>
   );
 }
@@ -283,6 +363,7 @@ export interface SandboxProps {
   canUndo: boolean;
   canRedo: boolean;
   onShare: () => void;
+  onTour: () => void;
 }
 
 function Warp2D({
@@ -297,6 +378,7 @@ function Warp2D({
   canUndo,
   canRedo,
   onShare,
+  onTour,
 }: SandboxProps) {
   const [t, setT] = useState(1);
   const [playing, setPlaying] = useState(false);
@@ -870,6 +952,9 @@ function Warp2D({
         >
           Feedback
         </a>
+        <button className="feedback-btn tutorial-btn" onClick={onTour}>
+          Tutorial
+        </button>
       </main>
     </div>
   );
