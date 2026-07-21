@@ -93,6 +93,11 @@ const COMMIT_MS = 400; // rapid edits within this window form one undo step
 
 const TOUR_SEEN_KEY = "warp:tourSeen";
 
+// Running inside an iframe (e.g. a scene embedded in a Warp Lessons article).
+// Embeds hide the Feedback/Tutorial chrome and never auto-launch the tour.
+const EMBEDDED =
+  typeof window !== "undefined" && window.self !== window.top;
+
 /** A doc the user hasn't touched: nothing but blank expression boxes. */
 function isBlankDoc(rows: Row[]): boolean {
   return rows.every((r) => r.kind === "expr" && r.src.trim() === "");
@@ -302,7 +307,9 @@ export default function App() {
     } catch {
       return; // can't remember dismissal — don't nag on every load
     }
-    // Only self-launch over a fresh sandbox, never over a shared scene.
+    // Only self-launch over a fresh sandbox, never over a shared scene or
+    // inside an embed (a blank sandbox embed shouldn't pop the tour).
+    if (EMBEDDED) return;
     if (INITIAL.mode !== "2d" || !isBlankDoc(INITIAL.d2.rows)) return;
     const t = setTimeout(openTour, 500);
     return () => clearTimeout(t);
@@ -944,17 +951,21 @@ function Warp2D({
           drawables={scene.drawables}
           projT={t}
         />
-        <a
-          className="feedback-btn"
-          href={FEEDBACK_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Feedback
-        </a>
-        <button className="feedback-btn tutorial-btn" onClick={onTour}>
-          Tutorial
-        </button>
+        {!EMBEDDED && (
+          <>
+            <a
+              className="feedback-btn"
+              href={FEEDBACK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Feedback
+            </a>
+            <button className="feedback-btn tutorial-btn" onClick={onTour}>
+              Tutorial
+            </button>
+          </>
+        )}
       </main>
     </div>
   );

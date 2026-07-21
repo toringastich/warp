@@ -38,6 +38,10 @@ import {
 import { fmt, valueToText } from "./format";
 import { type SandboxProps } from "./App";
 
+// Hide the Feedback/Tutorial chrome when this view is embedded in an iframe.
+const EMBEDDED =
+  typeof window !== "undefined" && window.self !== window.top;
+
 const ANIM_MS = 1400;
 
 const EMPTY_SET = new Set<RowId>();
@@ -441,17 +445,21 @@ export default function Warp3D({
           showActiveMatrix={activeTarget !== null}
           drawables={scene.drawables}
         />
-        <a
-          className="feedback-btn"
-          href={FEEDBACK_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Feedback
-        </a>
-        <button className="feedback-btn tutorial-btn" onClick={onTour}>
-          Tutorial
-        </button>
+        {!EMBEDDED && (
+          <>
+            <a
+              className="feedback-btn"
+              href={FEEDBACK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Feedback
+            </a>
+            <button className="feedback-btn tutorial-btn" onClick={onTour}>
+              Tutorial
+            </button>
+          </>
+        )}
       </main>
     </div>
   );
