@@ -31,13 +31,21 @@
     />
     <meta name="twitter:image" content="https://warp.us.com/social-card.png" />
 
-    <!-- GoatCounter analytics: privacy-friendly, no cookies, and count.js
-         skips localhost so dev work never pollutes the numbers. -->
-    <script
-      data-goatcounter="https://warpus.goatcounter.com/count"
-      async
-      src="//gc.zgo.at/count.js"
-    ></script>
+    <!-- Google Analytics (GA4). Skipped when embedded in an iframe, so Warp
+         scenes embedded in lessons don't inflate pageviews; skipped on
+         localhost so dev work never pollutes the numbers. -->
+    <script>
+      if (window.self === window.top && location.hostname !== "localhost") {
+        var s = document.createElement("script");
+        s.async = true;
+        s.src = "https://www.googletagmanager.com/gtag/js?id=G-KSXRQBEMD9";
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag("js", new Date());
+        gtag("config", "G-KSXRQBEMD9");
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
