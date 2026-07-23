@@ -916,6 +916,24 @@ function Warp2D({
     setT(value);
   };
 
+  // When embedded (a Warp Lessons scene), play the active warp on request
+  // from the host page — which fires once the embed is fully scrolled into
+  // view, so the scene reads as live rather than static. The ref keeps the
+  // one-time message listener pointed at the current active warp.
+  const autoplayRef = useRef(() => {});
+  autoplayRef.current = () => {
+    if (activeId) playWarp(activeId);
+  };
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    const onMsg = (e: MessageEvent) => {
+      if (e.data === "warp:autoplay") autoplayRef.current();
+    };
+    window.addEventListener("message", onMsg);
+    window.parent?.postMessage("warp:ready", "*");
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
   return (
     <div className="app">
       <ExpressionList

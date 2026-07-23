@@ -410,6 +410,21 @@ export default function Warp3D({
     setT(value);
   };
 
+  // Embedded scenes auto-play when the host page reports they're in view.
+  const autoplayRef = useRef(() => {});
+  autoplayRef.current = () => {
+    if (activeId) playWarp(activeId);
+  };
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    const onMsg = (e: MessageEvent) => {
+      if (e.data === "warp:autoplay") autoplayRef.current();
+    };
+    window.addEventListener("message", onMsg);
+    window.parent?.postMessage("warp:ready", "*");
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
   return (
     <div className="app">
       <ExpressionList
