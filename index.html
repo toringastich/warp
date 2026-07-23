@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Warp — Matrix Visualizer</title>
+    <meta
+      name="description"
+      content="A Desmos-style sandbox for linear algebra. Type a matrix and watch space warp — in 2D and 3D, with eigenvectors, determinants, symbolic algebra in x, y, z, and shareable URLs. No backend."
+    />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="canonical" href="https://warp.us.com/" />
+    <meta name="theme-color" content="#2d70b3" />
+
+    <!-- Social previews -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://warp.us.com/" />
+    <meta property="og:title" content="Warp — Type a matrix. Watch space warp." />
+    <meta
+      property="og:description"
+      content="A Desmos-style sandbox for linear algebra in 2D and 3D: eigenvectors, determinants, symbolic algebra in x, y, z, divergence & curl, shareable URLs. Fully client-side."
+    />
+    <meta property="og:image" content="https://warp.us.com/social-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Warp — Type a matrix. Watch space warp." />
+    <meta
+      name="twitter:description"
+      content="A Desmos-style sandbox for linear algebra in 2D and 3D — eigenvectors, determinants, symbolic algebra, shareable URLs."
+    />
+    <meta name="twitter:image" content="https://warp.us.com/social-card.png" />
+
+    <!-- Google Analytics (GA4). Skipped when embedded in an iframe, so Warp
+         scenes embedded in lessons don't inflate pageviews; skipped on
+         localhost so dev work never pollutes the numbers. -->
+    <script>
+      if (window.self === window.top && location.hostname !== "localhost") {
+        var s = document.createElement("script");
+        s.async = true;
+        s.src = "https://www.googletagmanager.com/gtag/js?id=G-KSXRQBEMD9";
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag("js", new Date());
+        gtag("config", "G-KSXRQBEMD9");
+      }
+    </script>
+    <script type="module" crossorigin src="./assets/index-B7V_RHl8.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CUBMebI_.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
