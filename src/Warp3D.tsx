@@ -42,6 +42,12 @@ import { type SandboxProps } from "./App";
 const EMBEDDED =
   typeof window !== "undefined" && window.self !== window.top;
 
+// An embed can opt the Tutorial button back in with ?tutorial=1.
+const SHOW_TUTORIAL =
+  !EMBEDDED ||
+  (typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("tutorial"));
+
 const ANIM_MS = 1400;
 
 const EMPTY_SET = new Set<RowId>();
@@ -446,19 +452,22 @@ export default function Warp3D({
           drawables={scene.drawables}
         />
         {!EMBEDDED && (
-          <>
-            <a
-              className="feedback-btn"
-              href={FEEDBACK_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Feedback
-            </a>
-            <button className="feedback-btn tutorial-btn" onClick={onTour}>
-              Tutorial
-            </button>
-          </>
+          <a
+            className="feedback-btn"
+            href={FEEDBACK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Feedback
+          </a>
+        )}
+        {SHOW_TUTORIAL && (
+          <button
+            className={"feedback-btn" + (!EMBEDDED ? " tutorial-btn" : "")}
+            onClick={onTour}
+          >
+            Tutorial
+          </button>
         )}
       </main>
     </div>

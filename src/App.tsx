@@ -98,6 +98,13 @@ const TOUR_SEEN_KEY = "warp:tourSeen";
 const EMBEDDED =
   typeof window !== "undefined" && window.self !== window.top;
 
+// An embed can opt the Tutorial button back in with ?tutorial=1 — used by the
+// open "try it yourself" sandbox at the end of a lesson.
+const SHOW_TUTORIAL =
+  !EMBEDDED ||
+  (typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("tutorial"));
+
 /** A doc the user hasn't touched: nothing but blank expression boxes. */
 function isBlankDoc(rows: Row[]): boolean {
   return rows.every((r) => r.kind === "expr" && r.src.trim() === "");
@@ -952,19 +959,22 @@ function Warp2D({
           projT={t}
         />
         {!EMBEDDED && (
-          <>
-            <a
-              className="feedback-btn"
-              href={FEEDBACK_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Feedback
-            </a>
-            <button className="feedback-btn tutorial-btn" onClick={onTour}>
-              Tutorial
-            </button>
-          </>
+          <a
+            className="feedback-btn"
+            href={FEEDBACK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Feedback
+          </a>
+        )}
+        {SHOW_TUTORIAL && (
+          <button
+            className={"feedback-btn" + (!EMBEDDED ? " tutorial-btn" : "")}
+            onClick={onTour}
+          >
+            Tutorial
+          </button>
         )}
       </main>
     </div>
