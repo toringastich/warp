@@ -55,7 +55,7 @@ same expression engine and expression-list UI on top of a Three.js stage.
 - **Expression-list sandbox**: add matrices (`M, N…`), vectors (`v, w…`),
   expressions, and sliders from the header **+** menu; each expression row's
   gear menu inserts any engine function (`det`, `eigen`, `svd`, `inv`,
-  `transpose`, `dot`, `norm`, `proj`, `circle`/`sphere`) — offering the ones
+  `transpose`, `diag`, `dot`, `norm`, `proj`, `circle`/`sphere`) — offering the ones
   that apply to the current dimension. Everything is live.
 - **Expression engine**: `+ − ×`, unary minus, parentheses, vector literals
   `(a, b)`, implicit multiplication, and variable references over scalars /
@@ -87,6 +87,11 @@ same expression engine and expression-list UI on top of a Three.js stage.
   is itself graphable — toggle it on and the play button animates one factor at
   a time, right-to-left (first N warps space, then M lands on M·N), with a
   stage indicator showing which factor is applying.
+- **`diag()`**: `diag(a, b)` (and `diag(a, b, c)` in 3D) builds a pure stretch
+  along the axes. Unlike four editable cells it can't accidentally stop being
+  diagonal, and because it's an expression it can be driven by sliders — matrix
+  cells evaluate in isolation and can't reference other rows, so this is the only
+  way a slider can move a stretch.
 - **Singular values / SVD**: `svd(M)` reports σ₁ ≥ σ₂ (≥ σ₃ in 3D) with the
   input direction each one stretches, plus a one-line reading of the whole
   decomposition (`Vᵀ spins −50.3°, Σ stretches, U spins 23.7°`). Toggle it on
