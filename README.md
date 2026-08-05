@@ -143,3 +143,11 @@ same expression engine and expression-list UI on top of a Three.js stage.
 Warp is deliberately a **sandbox** — a blank canvas you build scenes in, not a
 preset gallery. Next up: shareable URLs, deeper 3D (warped lattice, eigen,
 composition stages), and export.
+
+## Copyright (c) 2026 Secant Labs. All rights reserved.
+
+This software is proprietary. No license, express or implied, is granted
+to use, copy, modify, merge, publish, distribute, sublicense, or sell
+copies of this software except under separate written agreement.
+
+For licensing inquiries: [your contact]
